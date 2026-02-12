@@ -1,6 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'firebase_options.dart';
 
-void main() => runApp(const PebblesApp());
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+  runApp(const PebblesApp());
+}
 
 class PebblesApp extends StatelessWidget {
   const PebblesApp({super.key});
@@ -9,23 +18,54 @@ class PebblesApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true, 
-        colorSchemeSeed: Colors.blue,
-        scaffoldBackgroundColor: Colors.white,
-      ),
+      theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.blue),
       home: const MainNavigationScreen(),
     );
   }
 }
 
+// --- THE DATA MODEL ---
 class Habit {
+  String id;
   String name;
   String category;
-  List<bool> completionHistory; 
-  Habit({required this.name, required this.category, required this.completionHistory});
+  List<bool> completionHistory;
+  bool isStreakHabit;
+
+  Habit({
+    required this.id,
+    required this.name,
+    required this.category,
+    required this.completionHistory,
+    required this.isStreakHabit,
+  });
+
+  // LOGIC: Calculate current streak (counting back from today)
+  int get currentStreak {
+    if (!isStreakHabit) return 0;
+    int streak = 0;
+    for (int i = completionHistory.length - 1; i >= 0; i--) {
+      if (completionHistory[i]) {
+        streak++;
+      } else {
+        if (streak > 0) break;
+      }
+    }
+    return streak;
+  }
+
+  Color get color {
+    switch (category) {
+      case 'Health': return Colors.green;
+      case 'Work': return Colors.orange;
+      case 'Brain': return Colors.purple;
+      case 'Rest': return Colors.blueGrey;
+      default: return Colors.blue;
+    }
+  }
 }
 
+// --- MAIN NAVIGATION (THE BRAIN) ---
 class MainNavigationScreen extends StatefulWidget {
   const MainNavigationScreen({super.key});
 
@@ -36,73 +76,63 @@ class MainNavigationScreen extends StatefulWidget {
 class _MainNavigationScreenState extends State<MainNavigationScreen> {
   int _selectedIndex = 0;
 
-  late final List<Habit> globalHabits;
-
-  @override
-  void initState() {
-    super.initState();
-    globalHabits = [
-      {"name": "Nap", "cat": "Rest"},
-      {"name": "Insomnia", "cat": "Health"},
-      {"name": "Went outside", "cat": "Health"},
-      {"name": "Read", "cat": "Brain"},
-      {"name": "Worked out", "cat": "Health"},
-      {"name": "Hair wash", "cat": "Self-care"},
-      {"name": "Office", "cat": "Work"},
-      {"name": "#2", "cat": "Health"},
-      {"name": "Lips", "cat": "Self-care"},
-      {"name": "Period", "cat": "Health"},
-      {"name": "SD", "cat": "Other"},
-      {"name": "Placebo", "cat": "Health"},
-    ].map((h) => Habit(
-      name: h["name"]!, 
-      category: h["cat"]!, 
-      completionHistory: List.filled(14, false)
-    )).toList();
-  }
-
-  void _addHabit(String name, String category) {
-    setState(() {
-      globalHabits.add(Habit(name: name, category: category, completionHistory: List.filled(14, false)));
+  void _addHabit(String name, String category, bool isStreak) async {
+    await FirebaseFirestore.instance.collection('habits').add({
+      'name': name,
+      'category': category,
+      'isStreakHabit': isStreak,
+      'completionHistory': List.filled(14, false),
+      'createdAt': FieldValue.serverTimestamp(),
     });
   }
 
-  void _removeHabit(int index) {
-    setState(() {
-      globalHabits.removeAt(index);
-    });
+  void _removeHabit(String docId) async {
+    await FirebaseFirestore.instance.collection('habits').doc(docId).delete();
   }
 
-  // NEW: Logic to handle the drag-and-drop
-  void _reorderHabits(int oldIndex, int newIndex) {
-    setState(() {
-      if (newIndex > oldIndex) newIndex -= 1;
-      final Habit item = globalHabits.removeAt(oldIndex);
-      globalHabits.insert(newIndex, item);
-    });
+  void _toggleHabitDay(Habit habit, int dayIndex) async {
+    List<bool> newHistory = List.from(habit.completionHistory);
+    newHistory[dayIndex] = !newHistory[dayIndex];
+
+    await FirebaseFirestore.instance
+        .collection('habits')
+        .doc(habit.id)
+        .update({'completionHistory': newHistory});
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: IndexedStack(
-        index: _selectedIndex,
-        children: [
-          HabitCalendarScreen(habits: globalHabits), 
-          EditHabitsScreen(
-            habits: globalHabits, 
-            onAdd: _addHabit, 
-            onDelete: _removeHabit,
-            onReorder: _reorderHabits, // Pass the new function
-          ),
-        ],
+      body: StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance.collection('habits').orderBy('createdAt').snapshots(),
+        builder: (context, snapshot) {
+          if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+
+          List<Habit> habits = snapshot.data!.docs.map((doc) {
+            Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+            return Habit(
+              id: doc.id,
+              name: data['name'] ?? '',
+              category: data['category'] ?? 'Health',
+              isStreakHabit: data['isStreakHabit'] ?? false,
+              completionHistory: List<bool>.from(data['completionHistory'] ?? List.filled(14, false)),
+            );
+          }).toList();
+
+          return IndexedStack(
+            index: _selectedIndex,
+            children: [
+              HabitCalendarScreen(habits: habits, onToggle: _toggleHabitDay),
+              EditHabitsScreen(habits: habits, onAdd: _addHabit, onDelete: _removeHabit),
+            ],
+          );
+        },
       ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _selectedIndex,
         onTap: (index) => setState(() => _selectedIndex = index),
-        selectedItemColor: Colors.blue,
         items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.calendar_view_month), label: 'Calendar'),
+          BottomNavigationBarItem(icon: Icon(Icons.grid_on), label: 'Board'),
           BottomNavigationBarItem(icon: Icon(Icons.settings), label: 'Manage'),
         ],
       ),
@@ -110,184 +140,155 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   }
 }
 
-// --- CALENDAR SCREEN (Stays the same as before) ---
-class HabitCalendarScreen extends StatefulWidget {
+// --- CALENDAR BOARD (THE TABLE) ---
+class HabitCalendarScreen extends StatelessWidget {
   final List<Habit> habits;
-  const HabitCalendarScreen({super.key, required this.habits});
-  @override
-  State<HabitCalendarScreen> createState() => _HabitCalendarScreenState();
-}
+  final Function(Habit, int) onToggle;
 
-class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
-  final int daysToDisplay = 14;
-  final ScrollController _headerScroll = ScrollController();
-  final List<ScrollController> _rowScrolls = [];
-
-  void _syncControllers() {
-    _rowScrolls.clear();
-    for (var i = 0; i < widget.habits.length; i++) {
-      _rowScrolls.add(ScrollController());
-    }
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _syncControllers();
-    _headerScroll.addListener(() {
-      for (var c in _rowScrolls) {
-        if (c.hasClients) c.jumpTo(_headerScroll.offset);
-      }
-    });
-  }
+  const HabitCalendarScreen({super.key, required this.habits, required this.onToggle});
 
   @override
   Widget build(BuildContext context) {
-    if (_rowScrolls.length != widget.habits.length) _syncControllers();
-
     return Scaffold(
-      appBar: AppBar(title: const Text("Pebbles", style: TextStyle(fontWeight: FontWeight.bold))),
-      body: SafeArea(
-        child: Column(
-          children: [
-            Container(
-              height: 50,
-              decoration: BoxDecoration(color: Colors.grey[50], border: const Border(bottom: BorderSide(color: Colors.black12))),
-              child: Row(
-                children: [
-                  const SizedBox(width: 120, child: Center(child: Text("Habit", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)))),
-                  Expanded(
-                    child: SingleChildScrollView(
-                      controller: _headerScroll,
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
-                        children: List.generate(daysToDisplay, (i) {
-                          DateTime date = DateTime.now().subtract(Duration(days: i));
-                          String label = i == 0 ? "Today" : (i == 1 ? "Yest." : "${date.day}/${date.month}");
-                          return Container(width: 80, alignment: Alignment.center, child: Text(label, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11)));
-                        }),
+      appBar: AppBar(title: const Text("Pebbles Board")),
+      body: SingleChildScrollView(
+        scrollDirection: Axis.vertical,
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Table(
+              defaultColumnWidth: const FixedColumnWidth(45),
+              columnWidths: const {0: FixedColumnWidth(120)}, // Wider for name + streak
+              children: [
+                TableRow(
+                  children: [
+                    const Center(child: Text("Habit", style: TextStyle(fontWeight: FontWeight.bold))),
+                    ...List.generate(14, (i) => Center(
+                      child: Text("${i + 1}", style: const TextStyle(fontSize: 12, color: Colors.grey))
+                    )),
+                  ],
+                ),
+                ...habits.map((h) => TableRow(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8.0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(h.name, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+                          if (h.isStreakHabit && h.currentStreak > 0)
+                            Text("🔥 ${h.currentStreak}", style: const TextStyle(fontSize: 12, color: Colors.orange, fontWeight: FontWeight.bold)),
+                        ],
                       ),
                     ),
-                  ),
-                ],
-              ),
-            ),
-            Expanded(
-              child: ListView.builder(
-                itemCount: widget.habits.length,
-                itemBuilder: (context, index) {
-                  final h = widget.habits[index];
-                  return Container(
-                    height: 70,
-                    decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Colors.black12))),
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 120, padding: const EdgeInsets.only(left: 12), 
-                          child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [Text(h.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13), overflow: TextOverflow.ellipsis), Text(h.category, style: TextStyle(fontSize: 10, color: Colors.blueGrey[400]))])
-                        ),
-                        Expanded(
-                          child: SingleChildScrollView(
-                            controller: _rowScrolls[index],
-                            scrollDirection: Axis.horizontal,
-                            physics: const NeverScrollableScrollPhysics(),
-                            child: Row(
-                              children: List.generate(daysToDisplay, (dIndex) => 
-                                GestureDetector(
-                                  onTap: () => setState(() => h.completionHistory[dIndex] = !h.completionHistory[dIndex]),
-                                  child: Container(width: 80, child: Icon(h.completionHistory[dIndex] ? Icons.check_box : Icons.check_box_outline_blank, color: h.completionHistory[dIndex] ? Colors.blue : Colors.black12, size: 28)))),
+                    ...List.generate(14, (dayIdx) {
+                      bool isDone = h.completionHistory[dayIdx];
+                      return GestureDetector(
+                        onTap: () => onToggle(h, dayIdx),
+                        child: Padding(
+                          padding: const EdgeInsets.all(4.0),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 200),
+                            height: 32,
+                            decoration: BoxDecoration(
+                              color: isDone ? h.color : Colors.grey[200],
+                              shape: BoxShape.circle,
+                              border: Border.all(color: isDone ? h.color : Colors.grey[300]!),
+                              boxShadow: isDone ? [
+                                BoxShadow(color: h.color.withOpacity(0.4), blurRadius: 4, spreadRadius: 1)
+                              ] : [],
                             ),
                           ),
                         ),
-                      ],
-                    ),
-                  );
-                },
-              ),
+                      );
+                    }),
+                  ],
+                )),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
   }
 }
 
-// --- UPDATED EDIT SCREEN (With Reordering!) ---
-class EditHabitsScreen extends StatefulWidget {
+// --- MANAGE SCREEN (THE SETTINGS) ---
+class EditHabitsScreen extends StatelessWidget {
   final List<Habit> habits;
-  final Function(String, String) onAdd;
-  final Function(int) onDelete;
-  final Function(int, int) onReorder; // New
+  final Function(String, String, bool) onAdd; // Updated for streak bool
+  final Function(String) onDelete;
 
-  const EditHabitsScreen({super.key, required this.habits, required this.onAdd, required this.onDelete, required this.onReorder});
+  const EditHabitsScreen({super.key, required this.habits, required this.onAdd, required this.onDelete});
 
-  @override
-  State<EditHabitsScreen> createState() => _EditHabitsScreenState();
-}
-
-class _EditHabitsScreenState extends State<EditHabitsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text("Manage Habits")),
-      body: ReorderableListView.builder( // Switched to Reorderable!
-        itemCount: widget.habits.length,
-        onReorder: widget.onReorder,
+      body: ListView.builder(
+        itemCount: habits.length,
         itemBuilder: (context, index) {
-          final habit = widget.habits[index];
-          // Each item in a ReorderableListView MUST have a Key
+          final h = habits[index];
           return ListTile(
-            key: ValueKey(habit.name + index.toString()), 
-            leading: const Icon(Icons.reorder),
-            title: Text(habit.name, style: const TextStyle(fontWeight: FontWeight.w500)),
-            subtitle: Text(habit.category),
+            title: Text(h.name),
+            subtitle: Text("${h.category}${h.isStreakHabit ? ' • Streak enabled' : ''}"),
             trailing: IconButton(
               icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
-              onPressed: () => widget.onDelete(index),
+              onPressed: () => onDelete(h.id),
             ),
           );
         },
       ),
-      floatingActionButton: FloatingActionButton.extended(
+      floatingActionButton: FloatingActionButton(
         onPressed: () => _showAddDialog(context),
-        label: const Text("Add Habit"),
-        icon: const Icon(Icons.add),
+        child: const Icon(Icons.add),
       ),
     );
   }
 
-  // (Add Dialog stays the same)
   void _showAddDialog(BuildContext context) {
-    final nameController = TextEditingController();
-    String selectedCategory = "Health"; 
-    final categories = ["Health", "Work", "Self-care", "Brain", "Rest", "Other"];
+    final controller = TextEditingController();
+    String selectedCategory = 'Health';
+    bool isStreak = false;
 
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          title: const Text("Add New Habit"),
+          title: const Text("New Habit"),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              TextField(controller: nameController, autofocus: true, decoration: const InputDecoration(labelText: "Habit Name")),
+              TextField(controller: controller, decoration: const InputDecoration(hintText: "Name"), autofocus: true),
               const SizedBox(height: 20),
-              DropdownButtonFormField<String>(
+              DropdownButton<String>(
                 value: selectedCategory,
-                items: categories.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
+                isExpanded: true,
+                items: ['Health', 'Work', 'Brain', 'Rest', 'Other']
+                    .map((cat) => DropdownMenuItem(value: cat, child: Text(cat)))
+                    .toList(),
                 onChanged: (val) => setDialogState(() => selectedCategory = val!),
+              ),
+              const SizedBox(height: 10),
+              SwitchListTile(
+                title: const Text("Track Streak?", style: TextStyle(fontSize: 14)),
+                value: isStreak,
+                onChanged: (val) => setDialogState(() => isStreak = val),
               ),
             ],
           ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
-            ElevatedButton(onPressed: () {
-              if (nameController.text.isNotEmpty) {
-                widget.onAdd(nameController.text, selectedCategory);
-                Navigator.pop(context);
-              }
-            }, child: const Text("Add")),
+            ElevatedButton(
+              onPressed: () {
+                if (controller.text.isNotEmpty) {
+                  onAdd(controller.text, selectedCategory, isStreak);
+                  Navigator.pop(context);
+                }
+              }, 
+              child: const Text("Add"),
+            ),
           ],
         ),
       ),

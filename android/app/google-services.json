@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "29131849243",
+    "project_id": "pebbles---habit-tracking",
+    "storage_bucket": "pebbles---habit-tracking.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:29131849243:android:c6f1c50e0f205a99fb02be",
+        "android_client_info": {
+          "package_name": "com.example.pebbles_habit_tracker"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDlKqNzNaSXGqpGtTkJ8XeaemqcbMuGYfA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
