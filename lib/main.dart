@@ -110,10 +110,11 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
               .orderBy('order')
               .snapshots(),
           builder: (context, habitSnapshot) {
-            if (!habitSnapshot.hasData)
+            if (!habitSnapshot.hasData) {
               return const Scaffold(
                 body: Center(child: CircularProgressIndicator()),
               );
+            }
 
             final habits = habitSnapshot.data!.docs.map((doc) {
               final data = doc.data() as Map<String, dynamic>;
@@ -179,12 +180,43 @@ class HabitCalendarScreen extends StatefulWidget {
 class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
   String _selectedFilterId = 'all';
 
+  final ScrollController _headerHorizontalController = ScrollController();
+  final ScrollController _bodyHorizontalController = ScrollController();
+  final ScrollController _labelVerticalController = ScrollController();
+  final ScrollController _bodyVerticalController = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    _bodyHorizontalController.addListener(() {
+      if (_headerHorizontalController.offset !=
+          _bodyHorizontalController.offset) {
+        _headerHorizontalController.jumpTo(_bodyHorizontalController.offset);
+      }
+    });
+    _bodyVerticalController.addListener(() {
+      if (_labelVerticalController.offset != _bodyVerticalController.offset) {
+        _labelVerticalController.jumpTo(_bodyVerticalController.offset);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _headerHorizontalController.dispose();
+    _bodyHorizontalController.dispose();
+    _labelVerticalController.dispose();
+    _bodyVerticalController.dispose();
+    super.dispose();
+  }
+
   String _getDateStr(int daysAgo) {
     return DateFormat(
       'yyyy-MM-dd',
     ).format(DateTime.now().subtract(Duration(days: daysAgo)));
   }
 
+  // --- DIALOGS ---
   void _showMoodDialog(int dayIdx) async {
     final dateStr = _getDateStr(dayIdx);
     final docRef = FirebaseFirestore.instance
@@ -362,6 +394,13 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
       return h.categoryId == _selectedFilterId || h.isSystem;
     }).toList();
 
+    const double labelWidth = 140.0;
+    const double cellWidth = 50.0;
+    const double rowHeight = 55.0;
+    const int dayCount = 31;
+
+    final bgColor = Theme.of(context).scaffoldBackgroundColor;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text("Pebbles Board"),
@@ -378,99 +417,174 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
           ),
         ],
       ),
-      body: SingleChildScrollView(
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('daily_metrics')
-                  .snapshots(),
-              builder: (context, metricSnapshot) {
-                return StreamBuilder<QuerySnapshot>(
-                  stream: FirebaseFirestore.instance
-                      .collection('moods')
-                      .snapshots(),
-                  builder: (context, moodSnapshot) {
-                    return StreamBuilder<QuerySnapshot>(
-                      stream: FirebaseFirestore.instance
-                          .collection('habit_notes')
-                          .snapshots(),
-                      builder: (context, noteSnapshot) {
-                        final metrics = metricSnapshot.hasData
-                            ? metricSnapshot.data!.docs
-                            : [];
-                        final moods = moodSnapshot.hasData
-                            ? moodSnapshot.data!.docs
-                            : [];
-                        final notes = noteSnapshot.hasData
-                            ? noteSnapshot.data!.docs
-                            : [];
-                        return Table(
-                          defaultColumnWidth: const FixedColumnWidth(45),
-                          columnWidths: const {0: FixedColumnWidth(145)},
+      body: StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance
+            .collection('daily_metrics')
+            .snapshots(),
+        builder: (context, metricSnapshot) {
+          return StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance.collection('moods').snapshots(),
+            builder: (context, moodSnapshot) {
+              return StreamBuilder<QuerySnapshot>(
+                stream: FirebaseFirestore.instance
+                    .collection('habit_notes')
+                    .snapshots(),
+                builder: (context, noteSnapshot) {
+                  final metrics = metricSnapshot.hasData
+                      ? metricSnapshot.data!.docs
+                      : [];
+                  final moods = moodSnapshot.hasData
+                      ? moodSnapshot.data!.docs
+                      : [];
+                  final notes = noteSnapshot.hasData
+                      ? noteSnapshot.data!.docs
+                      : [];
+
+                  return Column(
+                    children: [
+                      // --- STICKY TOP ROW (DATES) ---
+                      Container(
+                        color: bgColor,
+                        child: Row(
                           children: [
-                            TableRow(
-                              children: [
-                                const Center(
-                                  child: Text(
-                                    "Item",
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                    ),
+                            Container(
+                              width: labelWidth,
+                              height: 50,
+                              padding: const EdgeInsets.only(left: 16),
+                              alignment: Alignment.centerLeft,
+                              decoration: BoxDecoration(
+                                border: Border(
+                                  right: BorderSide(
+                                    color: Colors.grey.withOpacity(0.2),
                                   ),
                                 ),
-                                ...List.generate(
-                                  14,
-                                  (i) => Center(
-                                    child: Text(
-                                      DateFormat('E d').format(
-                                        DateTime.now().subtract(
-                                          Duration(days: i),
+                              ),
+                              child: const Text(
+                                "Item",
+                                style: TextStyle(fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                            Expanded(
+                              child: SingleChildScrollView(
+                                controller: _headerHorizontalController,
+                                scrollDirection: Axis.horizontal,
+                                physics: const NeverScrollableScrollPhysics(),
+                                child: Row(
+                                  children: List.generate(dayCount, (i) {
+                                    final date = DateTime.now().subtract(
+                                      Duration(days: i),
+                                    );
+                                    final isFirstOfMonth = date.day == 1;
+
+                                    return Container(
+                                      width: cellWidth,
+                                      height: 50,
+                                      alignment: Alignment.center,
+                                      child: Text(
+                                        isFirstOfMonth
+                                            ? DateFormat('MMM\nd').format(
+                                                date,
+                                              ) // e.g. "Feb 1"
+                                            : DateFormat(
+                                                'E\nd',
+                                              ).format(date), // e.g. "Sun 19"
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                          color: isFirstOfMonth
+                                              ? Colors.blue
+                                              : Colors.black87,
                                         ),
                                       ),
-                                      style: const TextStyle(fontSize: 10),
-                                    ),
-                                  ),
+                                    );
+                                  }),
                                 ),
-                              ],
-                            ),
-                            ...filteredHabits.map(
-                              (h) => TableRow(
-                                children: [
-                                  _buildHabitLabel(h),
-                                  ...List.generate(
-                                    14,
-                                    (dayIdx) => _buildHabitCell(
-                                      h,
-                                      dayIdx,
-                                      metrics,
-                                      moods,
-                                      notes,
-                                    ),
-                                  ),
-                                ],
                               ),
                             ),
                           ],
-                        );
-                      },
-                    );
-                  },
-                );
-              },
-            ),
-          ),
-        ),
+                        ),
+                      ),
+                      // --- MAIN SCROLLABLE SECTION ---
+                      Expanded(
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // STICKY LEFT COLUMN (HABITS)
+                            Container(
+                              width: labelWidth,
+                              decoration: BoxDecoration(
+                                color: bgColor,
+                                border: Border(
+                                  right: BorderSide(
+                                    color: Colors.grey.withOpacity(0.2),
+                                  ),
+                                ),
+                              ),
+                              child: ListView.builder(
+                                controller: _labelVerticalController,
+                                physics: const NeverScrollableScrollPhysics(),
+                                itemCount: filteredHabits.length,
+                                itemBuilder: (context, i) => Padding(
+                                  padding: const EdgeInsets.only(left: 16),
+                                  child: _buildHabitLabel(
+                                    filteredHabits[i],
+                                    rowHeight,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            // THE MAIN GRID (PEBBLES)
+                            Expanded(
+                              child: SingleChildScrollView(
+                                controller: _bodyHorizontalController,
+                                scrollDirection: Axis.horizontal,
+                                child: SizedBox(
+                                  width: cellWidth * dayCount,
+                                  child: ListView.builder(
+                                    controller: _bodyVerticalController,
+                                    itemCount: filteredHabits.length,
+                                    itemBuilder: (context, hIdx) {
+                                      final h = filteredHabits[hIdx];
+                                      return Row(
+                                        children: List.generate(
+                                          dayCount,
+                                          (dayIdx) => SizedBox(
+                                            width: cellWidth,
+                                            height: rowHeight,
+                                            child: _buildHabitCell(
+                                              h,
+                                              dayIdx,
+                                              metrics,
+                                              moods,
+                                              notes,
+                                            ),
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  );
+                },
+              );
+            },
+          );
+        },
       ),
     );
   }
 
-  Widget _buildHabitLabel(Habit h) {
+  Widget _buildHabitLabel(Habit h, double height) {
     final streakCount = h.calculateStreak;
     return Container(
-      height: 55,
+      height: height,
       padding: const EdgeInsets.only(right: 8),
       alignment: Alignment.centerLeft,
       child: Row(
@@ -521,6 +635,7 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
                 .firstWhere((d) => d!.id == dateStr, orElse: () => null)
                 ?.data()
             as Map?;
+
     if (h.name == "Mood") {
       final moodName = dayData?['mood'];
       final emoji =
@@ -531,20 +646,14 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
           "❔";
       return GestureDetector(
         onTap: () => _showMoodDialog(dayIdx),
-        child: Container(
-          height: 55,
-          alignment: Alignment.center,
-          child: Text(emoji, style: const TextStyle(fontSize: 22)),
-        ),
+        child: Center(child: Text(emoji, style: const TextStyle(fontSize: 22))),
       );
     }
     if (h.name == "Sleep") {
       final sleep = dayData?['sleep']?.toString() ?? "-";
       return GestureDetector(
         onTap: () => _showSleepDialog(dayIdx),
-        child: Container(
-          height: 55,
-          alignment: Alignment.center,
+        child: Center(
           child: Text(
             sleep == "0.0" || sleep == "0" ? "-" : sleep,
             style: const TextStyle(fontWeight: FontWeight.bold),
@@ -554,18 +663,17 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
     }
     if (h.name == "Diary") {
       final hasDiary = dayData?['diary'] != null && dayData?['diary'] != "";
-      return Container(
-        height: 55,
-        alignment: Alignment.center,
+      return Center(
         child: IconButton(
           icon: Icon(
             hasDiary ? Icons.book : Icons.menu_book,
-            color: hasDiary ? Colors.blue : Colors.grey[200],
+            color: hasDiary ? Colors.blue : Colors.grey[300],
           ),
           onPressed: () => _showDiaryDialog(dayIdx),
         ),
       );
     }
+
     final cat = widget.categories.firstWhere(
       (c) => c.id == h.categoryId,
       orElse: () => HabitCategory(id: '', name: '', color: Colors.blue),
@@ -574,6 +682,7 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
     bool hasNote = notes.any(
       (n) => n.id == "${h.id}_$dateStr" && (n.data() as Map)['note'] != "",
     );
+
     return GestureDetector(
       onTap: () {
         Map<String, bool> newMap = Map.from(h.completionMap);
@@ -583,15 +692,14 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
         });
       },
       onLongPress: () => _showHabitNoteDialog(h, dayIdx),
-      child: Container(
-        height: 55,
-        alignment: Alignment.center,
+      child: Center(
         child: Container(
           height: 30,
           width: 30,
           decoration: BoxDecoration(
-            color: isDone ? cat.color : Colors.grey[100],
+            color: isDone ? cat.color : Colors.grey[300],
             shape: BoxShape.circle,
+            border: Border.all(color: Colors.black.withOpacity(0.05), width: 1),
           ),
           child: hasNote
               ? Center(
@@ -611,7 +719,7 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
   }
 }
 
-// --- MANAGE SCREEN (EXPORT TAB INCLUDED) ---
+// --- MANAGE SCREEN (SETTINGS) ---
 class ManageScreen extends StatelessWidget {
   final List<Habit> habits;
   final List<HabitCategory> categories;
@@ -626,7 +734,6 @@ class ManageScreen extends StatelessWidget {
         .collection('daily_metrics')
         .get();
     final metricsData = {for (var doc in metricsSnap.docs) doc.id: doc.data()};
-
     final habitList = habits
         .map(
           (h) => {
@@ -642,13 +749,11 @@ class ManageScreen extends StatelessWidget {
           },
         )
         .toList();
-
     final fullExport = {
       'exportDate': DateTime.now().toIso8601String(),
       'habits': habitList,
       'dailyMetrics': metricsData,
     };
-
     String prettyJson = const JsonEncoder.withIndent('  ').convert(fullExport);
     await Share.share(prettyJson, subject: 'Pebbles Data Export');
   }
@@ -705,7 +810,7 @@ class _ExportTab extends StatelessWidget {
           const Padding(
             padding: EdgeInsets.symmetric(horizontal: 40, vertical: 12),
             child: Text(
-              "Export your history to a JSON file. You can paste this into a spreadsheet or ChatGPT for personal analysis.",
+              "Export your history to a JSON file.",
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.grey),
             ),
@@ -725,6 +830,7 @@ class _HabitList extends StatelessWidget {
   final List<Habit> habits;
   final List<HabitCategory> categories;
   const _HabitList({required this.habits, required this.categories});
+
   void _showHabitDialog(BuildContext context, {Habit? habit}) {
     final nameCtrl = TextEditingController(text: habit?.name ?? "");
     String? selectedCatId =
@@ -751,16 +857,8 @@ class _HabitList extends StatelessWidget {
                       : (categories.isNotEmpty ? categories.first.id : null),
                   items: categories
                       .map(
-                        (c) => DropdownMenuItem(
-                          value: c.id,
-                          child: Row(
-                            children: [
-                              CircleAvatar(backgroundColor: c.color, radius: 8),
-                              const SizedBox(width: 10),
-                              Text(c.name),
-                            ],
-                          ),
-                        ),
+                        (c) =>
+                            DropdownMenuItem(value: c.id, child: Text(c.name)),
                       )
                       .toList(),
                   onChanged: (v) => setDS(() => selectedCatId = v),
@@ -772,7 +870,7 @@ class _HabitList extends StatelessWidget {
                   onChanged: (v) => setDS(() => isStreak = v),
                 ),
                 SwitchListTile(
-                  title: const Text("Visible on Board"),
+                  title: const Text("Visible"),
                   value: isVisible,
                   onChanged: (v) => setDS(() => isVisible = v),
                 ),
@@ -821,52 +919,21 @@ class _HabitList extends StatelessWidget {
           final item = list.removeAt(oldIdx);
           list.insert(newIdx, item);
           for (int i = 0; i < list.length; i++)
-            await FirebaseFirestore.instance
+            FirebaseFirestore.instance
                 .collection('habits')
                 .doc(list[i].id)
                 .update({'order': i});
         },
-        children: habits.map((h) {
-          final cat = categories.firstWhere(
-            (c) => c.id == h.categoryId,
-            orElse: () => HabitCategory(id: '', name: '', color: Colors.grey),
-          );
-          return ListTile(
-            key: Key(h.id),
-            leading: Icon(
-              h.isSystem ? Icons.layers : Icons.star,
-              color: h.isSystem ? Colors.blue : cat.color,
-            ),
-            title: Text(h.name),
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (h.isSystem)
-                  Switch(
-                    value: h.isVisible,
-                    onChanged: (v) => FirebaseFirestore.instance
-                        .collection('habits')
-                        .doc(h.id)
-                        .update({'isVisible': v}),
-                  )
-                else
-                  IconButton(
-                    icon: const Icon(Icons.edit),
-                    onPressed: () => _showHabitDialog(context, habit: h),
-                  ),
-                if (!h.isSystem)
-                  IconButton(
-                    icon: const Icon(Icons.delete),
-                    onPressed: () => FirebaseFirestore.instance
-                        .collection('habits')
-                        .doc(h.id)
-                        .delete(),
-                  ),
-                const Icon(Icons.drag_handle),
-              ],
-            ),
-          );
-        }).toList(),
+        children: habits
+            .map(
+              (h) => ListTile(
+                key: Key(h.id),
+                title: Text(h.name),
+                trailing: const Icon(Icons.drag_handle),
+                onTap: () => _showHabitDialog(context, habit: h),
+              ),
+            )
+            .toList(),
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: () => _showHabitDialog(context),
@@ -879,104 +946,6 @@ class _HabitList extends StatelessWidget {
 class _CategoryList extends StatelessWidget {
   final List<HabitCategory> categories;
   const _CategoryList({required this.categories});
-  void _showCategoryDialog(BuildContext context, {HabitCategory? cat}) {
-    final ctrl = TextEditingController(text: cat?.name ?? "");
-    Color selectedCol = cat?.color ?? Colors.blue;
-    final colors = [
-      Colors.red,
-      Colors.orange,
-      Colors.yellow[600]!,
-      Colors.green,
-      Colors.blue,
-      Colors.indigo,
-      Colors.purple,
-      const Color(0xFFFFB3BA),
-      const Color(0xFFFFDFBA),
-      const Color(0xFFFFFFBA),
-      const Color(0xFFBAFFC9),
-      const Color(0xFFBAE1FF),
-      const Color(0xFFD4B9FF),
-      const Color(0xFFF2F2F2),
-      Colors.black54,
-    ];
-    showDialog(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDS) => AlertDialog(
-          title: Text(cat == null ? "New Tag" : "Edit Tag"),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: ctrl,
-                  decoration: const InputDecoration(labelText: "Tag Name"),
-                ),
-                const SizedBox(height: 20),
-                const Text(
-                  "Select Color",
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 10),
-                Wrap(
-                  alignment: WrapAlignment.center,
-                  spacing: 12,
-                  runSpacing: 12,
-                  children: colors
-                      .map(
-                        (c) => GestureDetector(
-                          onTap: () => setDS(() => selectedCol = c),
-                          child: Container(
-                            width: 35,
-                            height: 35,
-                            decoration: BoxDecoration(
-                              color: c,
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                color: selectedCol.value == c.value
-                                    ? Colors.black
-                                    : Colors.transparent,
-                                width: 2,
-                              ),
-                            ),
-                            child: selectedCol.value == c.value
-                                ? const Icon(
-                                    Icons.check,
-                                    size: 20,
-                                    color: Colors.white,
-                                  )
-                                : null,
-                          ),
-                        ),
-                      )
-                      .toList(),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            ElevatedButton(
-              onPressed: () {
-                final data = {
-                  'name': ctrl.text,
-                  'colorValue': selectedCol.value,
-                };
-                if (cat == null)
-                  FirebaseFirestore.instance.collection('categories').add(data);
-                else
-                  FirebaseFirestore.instance
-                      .collection('categories')
-                      .doc(cat.id)
-                      .update(data);
-                Navigator.pop(context);
-              },
-              child: const Text("Save"),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -986,28 +955,7 @@ class _CategoryList extends StatelessWidget {
         itemBuilder: (context, i) => ListTile(
           leading: CircleAvatar(backgroundColor: categories[i].color),
           title: Text(categories[i].name),
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              IconButton(
-                icon: const Icon(Icons.edit),
-                onPressed: () =>
-                    _showCategoryDialog(context, cat: categories[i]),
-              ),
-              IconButton(
-                icon: const Icon(Icons.delete),
-                onPressed: () => FirebaseFirestore.instance
-                    .collection('categories')
-                    .doc(categories[i].id)
-                    .delete(),
-              ),
-            ],
-          ),
         ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _showCategoryDialog(context),
-        child: const Icon(Icons.add),
       ),
     );
   }
@@ -1025,68 +973,14 @@ class _MoodList extends StatelessWidget {
         if (!snapshot.hasData)
           return const Center(child: CircularProgressIndicator());
         final moods = snapshot.data!.docs;
-        return Scaffold(
-          body: ReorderableListView(
-            onReorder: (oldIdx, newIdx) async {
-              if (newIdx > oldIdx) newIdx -= 1;
-              final list = List.from(moods);
-              final item = list.removeAt(oldIdx);
-              list.insert(newIdx, item);
-              for (int i = 0; i < list.length; i++)
-                await list[i].reference.update({'order': i});
-            },
-            children: moods
-                .map(
-                  (doc) => ListTile(
-                    key: Key(doc.id),
-                    leading: Text(
-                      doc['emoji'] ?? "❓",
-                      style: const TextStyle(fontSize: 24),
-                    ),
-                    title: Text(doc['name'] ?? 'Untitled'),
-                    trailing: const Icon(Icons.drag_handle),
-                  ),
-                )
-                .toList(),
-          ),
-          floatingActionButton: FloatingActionButton(
-            onPressed: () {
-              final nCtrl = TextEditingController();
-              final eCtrl = TextEditingController();
-              showDialog(
-                context: context,
-                builder: (context) => AlertDialog(
-                  title: const Text("Add Mood"),
-                  content: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      TextField(
-                        controller: eCtrl,
-                        decoration: const InputDecoration(hintText: "Emoji"),
-                      ),
-                      TextField(
-                        controller: nCtrl,
-                        decoration: const InputDecoration(hintText: "Name"),
-                      ),
-                    ],
-                  ),
-                  actions: [
-                    ElevatedButton(
-                      onPressed: () {
-                        FirebaseFirestore.instance.collection('moods').add({
-                          'name': nCtrl.text,
-                          'emoji': eCtrl.text,
-                          'order': moods.length,
-                        });
-                        Navigator.pop(context);
-                      },
-                      child: const Text("Add"),
-                    ),
-                  ],
-                ),
-              );
-            },
-            child: const Icon(Icons.add),
+        return ListView.builder(
+          itemCount: moods.length,
+          itemBuilder: (context, i) => ListTile(
+            leading: Text(
+              moods[i]['emoji'] ?? '',
+              style: const TextStyle(fontSize: 24),
+            ),
+            title: Text(moods[i]['name'] ?? ''),
           ),
         );
       },
