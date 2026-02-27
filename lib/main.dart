@@ -58,12 +58,8 @@ class Habit {
   int get calculateStreak {
     int streak = 0;
     DateTime date = DateTime.now();
-
     String todayStr = DateFormat('yyyy-MM-dd').format(date);
-    if (completionMap[todayStr] == true) {
-      streak++;
-    }
-
+    if (completionMap[todayStr] == true) streak++;
     date = date.subtract(const Duration(days: 1));
     while (true) {
       String ds = DateFormat('yyyy-MM-dd').format(date);
@@ -89,9 +85,42 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   int _selectedIndex = 0;
 
   @override
+  void initState() {
+    super.initState();
+    _ensureSystemHabitsExist();
+  }
+
+  void _ensureSystemHabitsExist() async {
+    final habitsRef = FirebaseFirestore.instance.collection('habits');
+    final systemHabitNames = ['Mood', 'Sleep', 'Diary', 'Dreams'];
+    for (int i = 0; i < systemHabitNames.length; i++) {
+      final name = systemHabitNames[i];
+      final snap = await habitsRef
+          .where('name', isEqualTo: name)
+          .where('isSystem', isEqualTo: true)
+          .get();
+      if (snap.docs.isEmpty) {
+        habitsRef.add({
+          'name': name,
+          'categoryId': '',
+          'isStreakHabit': false,
+          'hasNotes': false,
+          'order': i,
+          'isSystem': true,
+          'isVisible': true,
+          'completionMap': {},
+        });
+      }
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance.collection('categories').snapshots(),
+      stream: FirebaseFirestore.instance
+          .collection('categories')
+          .orderBy('name')
+          .snapshots(),
       builder: (context, catSnapshot) {
         List<HabitCategory> categories = catSnapshot.hasData
             ? catSnapshot.data!.docs.map((doc) {
@@ -110,12 +139,10 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
               .orderBy('order')
               .snapshots(),
           builder: (context, habitSnapshot) {
-            if (!habitSnapshot.hasData) {
+            if (!habitSnapshot.hasData)
               return const Scaffold(
                 body: Center(child: CircularProgressIndicator()),
               );
-            }
-
             final habits = habitSnapshot.data!.docs.map((doc) {
               final data = doc.data() as Map<String, dynamic>;
               return Habit(
@@ -172,14 +199,12 @@ class HabitCalendarScreen extends StatefulWidget {
     required this.habits,
     required this.categories,
   });
-
   @override
   State<HabitCalendarScreen> createState() => _HabitCalendarScreenState();
 }
 
 class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
-  String _selectedFilterId = 'all';
-
+  String _selectedFilterId = 'all'; // 'all', 'alphabetical', or categoryId
   final ScrollController _headerHorizontalController = ScrollController();
   final ScrollController _bodyHorizontalController = ScrollController();
   final ScrollController _labelVerticalController = ScrollController();
@@ -201,91 +226,39 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
     });
   }
 
-  @override
-  void dispose() {
-    _headerHorizontalController.dispose();
-    _bodyHorizontalController.dispose();
-    _labelVerticalController.dispose();
-    _bodyVerticalController.dispose();
-    super.dispose();
-  }
+  String _getDateStr(int daysAgo) => DateFormat(
+    'yyyy-MM-dd',
+  ).format(DateTime.now().subtract(Duration(days: daysAgo)));
 
-  String _getDateStr(int daysAgo) {
-    return DateFormat(
-      'yyyy-MM-dd',
-    ).format(DateTime.now().subtract(Duration(days: daysAgo)));
-  }
-
-  // --- DIALOGS ---
-  void _showMoodDialog(int dayIdx) async {
-    final dateStr = _getDateStr(dayIdx);
-    final docRef = FirebaseFirestore.instance
-        .collection('daily_metrics')
-        .doc(dateStr);
-    final moodSnapshot = await FirebaseFirestore.instance
-        .collection('moods')
-        .orderBy('order')
-        .get();
-    final moodsToDisplay = moodSnapshot.docs.isNotEmpty
-        ? moodSnapshot.docs
-              .map((d) => d.data() as Map<String, dynamic>)
-              .toList()
-        : [
-            {'emoji': '😊', 'name': 'Happy'},
-            {'emoji': '😐', 'name': 'Neutral'},
-            {'emoji': '😔', 'name': 'Sad'},
-          ];
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(
-          "Mood: ${DateFormat('MMM d').format(DateTime.parse(dateStr))}",
-        ),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: ListView.builder(
-            shrinkWrap: true,
-            itemCount: moodsToDisplay.length,
-            itemBuilder: (context, i) => ListTile(
-              leading: Text(
-                moodsToDisplay[i]['emoji'] ?? '?',
-                style: const TextStyle(fontSize: 24),
-              ),
-              title: Text(moodsToDisplay[i]['name'] ?? ''),
-              onTap: () {
-                docRef.set({
-                  'mood': moodsToDisplay[i]['name'],
-                  'date': dateStr,
-                }, SetOptions(merge: true));
-                Navigator.pop(context);
-              },
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _showDiaryDialog(int dayIdx) async {
+  void _showTextEntryDialog(String title, String fieldKey, int dayIdx) async {
     final dateStr = _getDateStr(dayIdx);
     final docRef = FirebaseFirestore.instance
         .collection('daily_metrics')
         .doc(dateStr);
     final doc = await docRef.get();
     final ctrl = TextEditingController(
-      text: doc.exists ? (doc.data() as Map)['diary'] ?? "" : "",
+      text: doc.exists ? (doc.data() as Map)[fieldKey] ?? "" : "",
     );
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: Text(
-          "Diary: ${DateFormat('MMM d').format(DateTime.parse(dateStr))}",
+          "$title: ${DateFormat('MMM d').format(DateTime.parse(dateStr))}",
         ),
-        content: TextField(
-          controller: ctrl,
-          minLines: 4,
-          maxLines: 6,
-          decoration: const InputDecoration(border: OutlineInputBorder()),
+        content: SizedBox(
+          height: 200,
+          width: double.maxFinite,
+          child: TextField(
+            controller: ctrl,
+            maxLines: null,
+            expands: true,
+            textCapitalization: TextCapitalization.sentences,
+            textAlignVertical: TextAlignVertical.top,
+            decoration: const InputDecoration(
+              border: OutlineInputBorder(),
+              hintText: "Start writing...",
+            ),
+          ),
         ),
         actions: [
           TextButton(
@@ -295,7 +268,7 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
           ElevatedButton(
             onPressed: () {
               docRef.set({
-                'diary': ctrl.text,
+                fieldKey: ctrl.text,
                 'date': dateStr,
               }, SetOptions(merge: true));
               Navigator.pop(context);
@@ -303,6 +276,49 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
             child: const Text("Save"),
           ),
         ],
+      ),
+    );
+  }
+
+  void _showMoodDialog(int dayIdx) async {
+    final dateStr = _getDateStr(dayIdx);
+    final docRef = FirebaseFirestore.instance
+        .collection('daily_metrics')
+        .doc(dateStr);
+    final moodSnapshot = await FirebaseFirestore.instance
+        .collection('moods')
+        .orderBy('order')
+        .get();
+    final moodsToDisplay = moodSnapshot.docs
+        .map((d) => d.data() as Map<String, dynamic>)
+        .toList();
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Mood"),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: moodsToDisplay.isEmpty
+              ? const Text("No moods added yet. Go to Settings > Moods.")
+              : ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: moodsToDisplay.length,
+                  itemBuilder: (context, i) => ListTile(
+                    leading: Text(
+                      moodsToDisplay[i]['emoji'] ?? '?',
+                      style: const TextStyle(fontSize: 24),
+                    ),
+                    title: Text(moodsToDisplay[i]['name'] ?? ''),
+                    onTap: () {
+                      docRef.set({
+                        'mood': moodsToDisplay[i]['name'],
+                        'date': dateStr,
+                      }, SetOptions(merge: true));
+                      Navigator.pop(context);
+                    },
+                  ),
+                ),
+        ),
       ),
     );
   }
@@ -319,13 +335,14 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(
-          "Sleep: ${DateFormat('MMM d').format(DateTime.parse(dateStr))}",
-        ),
+        title: const Text("Sleep Hours"),
         content: TextField(
           controller: ctrl,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: const InputDecoration(suffixText: "hours"),
+          decoration: const InputDecoration(
+            suffixText: "hours",
+            hintText: "e.g. 7.5",
+          ),
         ),
         actions: [
           TextButton(
@@ -334,8 +351,9 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
           ),
           ElevatedButton(
             onPressed: () {
+              double? val = double.tryParse(ctrl.text.replaceFirst(',', '.'));
               docRef.set({
-                'sleep': double.tryParse(ctrl.text) ?? 0,
+                'sleep': val ?? 0.0,
                 'date': dateStr,
               }, SetOptions(merge: true));
               Navigator.pop(context);
@@ -347,58 +365,26 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
     );
   }
 
-  void _showHabitNoteDialog(Habit habit, int dayIdx) async {
-    final dateStr = _getDateStr(dayIdx);
-    final noteRef = FirebaseFirestore.instance
-        .collection('habit_notes')
-        .doc("${habit.id}_$dateStr");
-    final doc = await noteRef.get();
-    final ctrl = TextEditingController(
-      text: doc.exists ? doc.data()!['note'] : "",
-    );
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text("${habit.name} Note"),
-        content: TextField(
-          controller: ctrl,
-          maxLines: 3,
-          decoration: const InputDecoration(hintText: "Daily note..."),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text("Cancel"),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              noteRef.set({
-                'note': ctrl.text,
-                'date': dateStr,
-                'habitId': habit.id,
-              });
-              Navigator.pop(context);
-            },
-            child: const Text("Save"),
-          ),
-        ],
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
-    final filteredHabits = widget.habits.where((h) {
-      if (!h.isVisible) return false;
-      if (_selectedFilterId == 'all') return true;
-      return h.categoryId == _selectedFilterId || h.isSystem;
-    }).toList();
+    List<Habit> filteredHabits = widget.habits
+        .where((h) => h.isVisible)
+        .toList();
+
+    // Apply filtering/sorting logic
+    if (_selectedFilterId == 'alphabetical') {
+      filteredHabits.sort(
+        (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+      );
+    } else if (_selectedFilterId != 'all') {
+      filteredHabits = filteredHabits
+          .where((h) => h.categoryId == _selectedFilterId || h.isSystem)
+          .toList();
+    }
 
     const double labelWidth = 140.0;
     const double cellWidth = 50.0;
     const double rowHeight = 55.0;
-    const int dayCount = 31;
-
     final bgColor = Theme.of(context).scaffoldBackgroundColor;
 
     return Scaffold(
@@ -409,7 +395,27 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
             icon: const Icon(Icons.filter_list),
             onSelected: (val) => setState(() => _selectedFilterId = val),
             itemBuilder: (context) => [
-              const PopupMenuItem(value: 'all', child: Text("All Tags")),
+              const PopupMenuItem(
+                value: 'all',
+                child: Row(
+                  children: [
+                    Icon(Icons.sort),
+                    SizedBox(width: 8),
+                    Text("Custom Order"),
+                  ],
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'alphabetical',
+                child: Row(
+                  children: [
+                    Icon(Icons.sort_by_alpha),
+                    SizedBox(width: 8),
+                    Text("Alphabetical (A-Z)"),
+                  ],
+                ),
+              ),
+              const PopupMenuDivider(),
               ...widget.categories.map(
                 (c) => PopupMenuItem(value: c.id, child: Text(c.name)),
               ),
@@ -422,159 +428,99 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
             .collection('daily_metrics')
             .snapshots(),
         builder: (context, metricSnapshot) {
-          return StreamBuilder<QuerySnapshot>(
-            stream: FirebaseFirestore.instance.collection('moods').snapshots(),
-            builder: (context, moodSnapshot) {
-              return StreamBuilder<QuerySnapshot>(
-                stream: FirebaseFirestore.instance
-                    .collection('habit_notes')
-                    .snapshots(),
-                builder: (context, noteSnapshot) {
-                  final metrics = metricSnapshot.hasData
-                      ? metricSnapshot.data!.docs
-                      : [];
-                  final moods = moodSnapshot.hasData
-                      ? moodSnapshot.data!.docs
-                      : [];
-                  final notes = noteSnapshot.hasData
-                      ? noteSnapshot.data!.docs
-                      : [];
-
-                  return Column(
-                    children: [
-                      // --- STICKY TOP ROW (DATES) ---
-                      Container(
-                        color: bgColor,
+          final metrics = metricSnapshot.hasData
+              ? metricSnapshot.data!.docs
+              : [];
+          return Column(
+            children: [
+              Container(
+                color: bgColor,
+                child: Row(
+                  children: [
+                    Container(
+                      width: labelWidth,
+                      height: 50,
+                      alignment: Alignment.centerLeft,
+                      padding: const EdgeInsets.only(left: 16),
+                      child: const Text(
+                        "Item",
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                    Expanded(
+                      child: SingleChildScrollView(
+                        controller: _headerHorizontalController,
+                        scrollDirection: Axis.horizontal,
+                        physics: const NeverScrollableScrollPhysics(),
                         child: Row(
-                          children: [
-                            Container(
-                              width: labelWidth,
+                          children: List.generate(31, (i) {
+                            final date = DateTime.now().subtract(
+                              Duration(days: i),
+                            );
+                            return Container(
+                              width: cellWidth,
                               height: 50,
-                              padding: const EdgeInsets.only(left: 16),
-                              alignment: Alignment.centerLeft,
-                              decoration: BoxDecoration(
-                                border: Border(
-                                  right: BorderSide(
-                                    color: Colors.grey.withOpacity(0.2),
-                                  ),
+                              alignment: Alignment.center,
+                              child: Text(
+                                DateFormat('E\nd').format(date),
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
                                 ),
                               ),
-                              child: const Text(
-                                "Item",
-                                style: TextStyle(fontWeight: FontWeight.bold),
-                              ),
-                            ),
-                            Expanded(
-                              child: SingleChildScrollView(
-                                controller: _headerHorizontalController,
-                                scrollDirection: Axis.horizontal,
-                                physics: const NeverScrollableScrollPhysics(),
-                                child: Row(
-                                  children: List.generate(dayCount, (i) {
-                                    final date = DateTime.now().subtract(
-                                      Duration(days: i),
-                                    );
-                                    final isFirstOfMonth = date.day == 1;
-
-                                    return Container(
-                                      width: cellWidth,
-                                      height: 50,
-                                      alignment: Alignment.center,
-                                      child: Text(
-                                        isFirstOfMonth
-                                            ? DateFormat('MMM\nd').format(
-                                                date,
-                                              ) // e.g. "Feb 1"
-                                            : DateFormat(
-                                                'E\nd',
-                                              ).format(date), // e.g. "Sun 19"
-                                        textAlign: TextAlign.center,
-                                        style: TextStyle(
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.bold,
-                                          color: isFirstOfMonth
-                                              ? Colors.blue
-                                              : Colors.black87,
-                                        ),
-                                      ),
-                                    );
-                                  }),
-                                ),
-                              ),
-                            ),
-                          ],
+                            );
+                          }),
                         ),
                       ),
-                      // --- MAIN SCROLLABLE SECTION ---
-                      Expanded(
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            // STICKY LEFT COLUMN (HABITS)
-                            Container(
-                              width: labelWidth,
-                              decoration: BoxDecoration(
-                                color: bgColor,
-                                border: Border(
-                                  right: BorderSide(
-                                    color: Colors.grey.withOpacity(0.2),
-                                  ),
-                                ),
-                              ),
-                              child: ListView.builder(
-                                controller: _labelVerticalController,
-                                physics: const NeverScrollableScrollPhysics(),
-                                itemCount: filteredHabits.length,
-                                itemBuilder: (context, i) => Padding(
-                                  padding: const EdgeInsets.only(left: 16),
-                                  child: _buildHabitLabel(
-                                    filteredHabits[i],
-                                    rowHeight,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            // THE MAIN GRID (PEBBLES)
-                            Expanded(
-                              child: SingleChildScrollView(
-                                controller: _bodyHorizontalController,
-                                scrollDirection: Axis.horizontal,
-                                child: SizedBox(
-                                  width: cellWidth * dayCount,
-                                  child: ListView.builder(
-                                    controller: _bodyVerticalController,
-                                    itemCount: filteredHabits.length,
-                                    itemBuilder: (context, hIdx) {
-                                      final h = filteredHabits[hIdx];
-                                      return Row(
-                                        children: List.generate(
-                                          dayCount,
-                                          (dayIdx) => SizedBox(
-                                            width: cellWidth,
-                                            height: rowHeight,
-                                            child: _buildHabitCell(
-                                              h,
-                                              dayIdx,
-                                              metrics,
-                                              moods,
-                                              notes,
-                                            ),
-                                          ),
-                                        ),
-                                      );
-                                    },
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: Row(
+                  children: [
+                    Container(
+                      width: labelWidth,
+                      child: ListView.builder(
+                        controller: _labelVerticalController,
+                        physics: const NeverScrollableScrollPhysics(),
+                        itemCount: filteredHabits.length,
+                        itemBuilder: (context, i) =>
+                            _buildHabitLabel(filteredHabits[i], rowHeight),
+                      ),
+                    ),
+                    Expanded(
+                      child: SingleChildScrollView(
+                        controller: _bodyHorizontalController,
+                        scrollDirection: Axis.horizontal,
+                        child: SizedBox(
+                          width: cellWidth * 31,
+                          child: ListView.builder(
+                            controller: _bodyVerticalController,
+                            itemCount: filteredHabits.length,
+                            itemBuilder: (context, hIdx) => Row(
+                              children: List.generate(
+                                31,
+                                (dayIdx) => SizedBox(
+                                  width: cellWidth,
+                                  height: rowHeight,
+                                  child: _buildHabitCell(
+                                    filteredHabits[hIdx],
+                                    dayIdx,
+                                    metrics,
                                   ),
                                 ),
                               ),
                             ),
-                          ],
+                          ),
                         ),
                       ),
-                    ],
-                  );
-                },
-              );
-            },
+                    ),
+                  ],
+                ),
+              ),
+            ],
           );
         },
       ),
@@ -582,10 +528,10 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
   }
 
   Widget _buildHabitLabel(Habit h, double height) {
-    final streakCount = h.calculateStreak;
+    final streak = h.calculateStreak;
     return Container(
       height: height,
-      padding: const EdgeInsets.only(right: 8),
+      padding: const EdgeInsets.only(left: 16, right: 8),
       alignment: Alignment.centerLeft,
       child: Row(
         children: [
@@ -596,24 +542,16 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
                 fontWeight: h.isSystem ? FontWeight.bold : FontWeight.normal,
                 fontSize: 13,
               ),
-              maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),
           ),
-          if (h.isStreakHabit && streakCount > 0)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-              decoration: BoxDecoration(
-                color: Colors.orange.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: Text(
-                "🔥$streakCount",
-                style: const TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.orange,
-                ),
+          if (h.isStreakHabit && streak > 0)
+            Text(
+              "🔥$streak",
+              style: const TextStyle(
+                fontSize: 11,
+                color: Colors.orange,
+                fontWeight: FontWeight.bold,
               ),
             ),
         ],
@@ -621,13 +559,7 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
     );
   }
 
-  Widget _buildHabitCell(
-    Habit h,
-    int dayIdx,
-    List metrics,
-    List moods,
-    List notes,
-  ) {
+  Widget _buildHabitCell(Habit h, int dayIdx, List metrics) {
     final dateStr = _getDateStr(dayIdx);
     final dayData =
         metrics
@@ -635,54 +567,51 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
                 .firstWhere((d) => d!.id == dateStr, orElse: () => null)
                 ?.data()
             as Map?;
-
-    if (h.name == "Mood") {
-      final moodName = dayData?['mood'];
-      final emoji =
-          moods.cast<QueryDocumentSnapshot?>().firstWhere(
-            (m) => m!['name'] == moodName,
-            orElse: () => null,
-          )?['emoji'] ??
-          "❔";
+    if (h.name == "Mood")
       return GestureDetector(
         onTap: () => _showMoodDialog(dayIdx),
-        child: Center(child: Text(emoji, style: const TextStyle(fontSize: 22))),
+        child: Center(
+          child: Text(
+            dayData?['mood'] != null ? "😊" : "❔",
+            style: const TextStyle(fontSize: 22),
+          ),
+        ),
       );
-    }
-    if (h.name == "Sleep") {
-      final sleep = dayData?['sleep']?.toString() ?? "-";
+    if (h.name == "Sleep")
       return GestureDetector(
         onTap: () => _showSleepDialog(dayIdx),
         child: Center(
           child: Text(
-            sleep == "0.0" || sleep == "0" ? "-" : sleep,
+            dayData?['sleep']?.toString() ?? "-",
             style: const TextStyle(fontWeight: FontWeight.bold),
           ),
         ),
       );
-    }
     if (h.name == "Diary") {
-      final hasDiary = dayData?['diary'] != null && dayData?['diary'] != "";
-      return Center(
-        child: IconButton(
-          icon: Icon(
-            hasDiary ? Icons.book : Icons.menu_book,
-            color: hasDiary ? Colors.blue : Colors.grey[300],
-          ),
-          onPressed: () => _showDiaryDialog(dayIdx),
+      bool hasVal = dayData?['diary'] != null && dayData?['diary'] != "";
+      return IconButton(
+        icon: Icon(
+          hasVal ? Icons.book : Icons.menu_book,
+          color: hasVal ? Colors.blue : Colors.grey[300],
         ),
+        onPressed: () => _showTextEntryDialog("Diary", "diary", dayIdx),
       );
     }
-
+    if (h.name == "Dreams") {
+      bool hasVal = dayData?['dreams'] != null && dayData?['dreams'] != "";
+      return IconButton(
+        icon: Icon(
+          hasVal ? Icons.cloud : Icons.cloud_outlined,
+          color: hasVal ? Colors.purple : Colors.grey[300],
+        ),
+        onPressed: () => _showTextEntryDialog("Dreams", "dreams", dayIdx),
+      );
+    }
     final cat = widget.categories.firstWhere(
       (c) => c.id == h.categoryId,
       orElse: () => HabitCategory(id: '', name: '', color: Colors.blue),
     );
     bool isDone = h.completionMap[dateStr] ?? false;
-    bool hasNote = notes.any(
-      (n) => n.id == "${h.id}_$dateStr" && (n.data() as Map)['note'] != "",
-    );
-
     return GestureDetector(
       onTap: () {
         Map<String, bool> newMap = Map.from(h.completionMap);
@@ -691,7 +620,6 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
           'completionMap': newMap,
         });
       },
-      onLongPress: () => _showHabitNoteDialog(h, dayIdx),
       child: Center(
         child: Container(
           height: 30,
@@ -699,27 +627,14 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
           decoration: BoxDecoration(
             color: isDone ? cat.color : Colors.grey[300],
             shape: BoxShape.circle,
-            border: Border.all(color: Colors.black.withOpacity(0.05), width: 1),
           ),
-          child: hasNote
-              ? Center(
-                  child: Container(
-                    width: 4,
-                    height: 4,
-                    decoration: const BoxDecoration(
-                      color: Colors.black,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                )
-              : null,
         ),
       ),
     );
   }
 }
 
-// --- MANAGE SCREEN (SETTINGS) ---
+// --- SETTINGS SCREEN ---
 class ManageScreen extends StatelessWidget {
   final List<Habit> habits;
   final List<HabitCategory> categories;
@@ -728,50 +643,18 @@ class ManageScreen extends StatelessWidget {
     required this.habits,
     required this.categories,
   });
-
-  void _exportData(BuildContext context) async {
-    final metricsSnap = await FirebaseFirestore.instance
-        .collection('daily_metrics')
-        .get();
-    final metricsData = {for (var doc in metricsSnap.docs) doc.id: doc.data()};
-    final habitList = habits
-        .map(
-          (h) => {
-            'name': h.name,
-            'tag': categories
-                .firstWhere(
-                  (c) => c.id == h.categoryId,
-                  orElse: () =>
-                      HabitCategory(id: '', name: 'None', color: Colors.grey),
-                )
-                .name,
-            'completions': h.completionMap,
-          },
-        )
-        .toList();
-    final fullExport = {
-      'exportDate': DateTime.now().toIso8601String(),
-      'habits': habitList,
-      'dailyMetrics': metricsData,
-    };
-    String prettyJson = const JsonEncoder.withIndent('  ').convert(fullExport);
-    await Share.share(prettyJson, subject: 'Pebbles Data Export');
-  }
-
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 4,
+      length: 3,
       child: Scaffold(
         appBar: AppBar(
           title: const Text("Settings"),
           bottom: const TabBar(
-            isScrollable: true,
             tabs: [
               Tab(text: "Habits"),
               Tab(text: "Tags"),
               Tab(text: "Moods"),
-              Tab(text: "Export"),
             ],
           ),
         ),
@@ -780,47 +663,8 @@ class ManageScreen extends StatelessWidget {
             _HabitList(habits: habits, categories: categories),
             _CategoryList(categories: categories),
             _MoodList(),
-            _ExportTab(onExport: () => _exportData(context)),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _ExportTab extends StatelessWidget {
-  final VoidCallback onExport;
-  const _ExportTab({required this.onExport});
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(
-            Icons.cloud_download_outlined,
-            size: 80,
-            color: Colors.blueGrey,
-          ),
-          const SizedBox(height: 20),
-          const Text(
-            "Data Backup",
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-          ),
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 40, vertical: 12),
-            child: Text(
-              "Export your history to a JSON file.",
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.grey),
-            ),
-          ),
-          ElevatedButton.icon(
-            onPressed: onExport,
-            icon: const Icon(Icons.share),
-            label: const Text("Export Raw Data"),
-          ),
-        ],
       ),
     );
   }
@@ -833,66 +677,64 @@ class _HabitList extends StatelessWidget {
 
   void _showHabitDialog(BuildContext context, {Habit? habit}) {
     final nameCtrl = TextEditingController(text: habit?.name ?? "");
-    String? selectedCatId =
+    String? selCat =
         habit?.categoryId ??
         (categories.isNotEmpty ? categories.first.id : null);
     bool isStreak = habit?.isStreakHabit ?? false;
-    bool isVisible = habit?.isVisible ?? true;
+    bool isVis = habit?.isVisible ?? true;
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDS) => AlertDialog(
-          title: Text(habit == null ? "New Habit" : "Edit Habit"),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
+          title: Text(habit == null ? "New Habit" : "Edit ${habit.name}"),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (habit?.isSystem != true)
                 TextField(
                   controller: nameCtrl,
                   decoration: const InputDecoration(labelText: "Name"),
                 ),
+              if (habit?.isSystem != true)
                 DropdownButtonFormField<String>(
-                  value: categories.any((c) => c.id == selectedCatId)
-                      ? selectedCatId
-                      : (categories.isNotEmpty ? categories.first.id : null),
+                  value: categories.any((c) => c.id == selCat) ? selCat : null,
                   items: categories
                       .map(
                         (c) =>
                             DropdownMenuItem(value: c.id, child: Text(c.name)),
                       )
                       .toList(),
-                  onChanged: (v) => setDS(() => selectedCatId = v),
+                  onChanged: (v) => setDS(() => selCat = v),
                   decoration: const InputDecoration(labelText: "Tag"),
                 ),
+              if (habit?.isSystem != true)
                 SwitchListTile(
                   title: const Text("Show Streak?"),
                   value: isStreak,
                   onChanged: (v) => setDS(() => isStreak = v),
                 ),
-                SwitchListTile(
-                  title: const Text("Visible"),
-                  value: isVisible,
-                  onChanged: (v) => setDS(() => isVisible = v),
-                ),
-              ],
-            ),
+              SwitchListTile(
+                title: const Text("Visible on Board"),
+                value: isVis,
+                onChanged: (v) => setDS(() => isVis = v),
+              ),
+            ],
           ),
           actions: [
             ElevatedButton(
               onPressed: () {
                 final data = {
                   'name': nameCtrl.text,
-                  'categoryId': selectedCatId ?? '',
+                  'categoryId': selCat ?? '',
                   'isStreakHabit': isStreak,
-                  'isVisible': isVisible,
+                  'isVisible': isVis,
                 };
                 if (habit == null)
                   FirebaseFirestore.instance.collection('habits').add({
                     ...data,
                     'order': habits.length,
-                    'completionMap': {},
                     'isSystem': false,
-                    'hasNotes': true,
+                    'completionMap': {},
                   });
                 else
                   FirebaseFirestore.instance
@@ -913,7 +755,7 @@ class _HabitList extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       body: ReorderableListView(
-        onReorder: (oldIdx, newIdx) async {
+        onReorder: (oldIdx, newIdx) {
           if (newIdx > oldIdx) newIdx -= 1;
           final list = List<Habit>.from(habits);
           final item = list.removeAt(oldIdx);
@@ -928,7 +770,14 @@ class _HabitList extends StatelessWidget {
             .map(
               (h) => ListTile(
                 key: Key(h.id),
-                title: Text(h.name),
+                title: Text(
+                  h.name,
+                  style: TextStyle(
+                    fontWeight: h.isSystem
+                        ? FontWeight.bold
+                        : FontWeight.normal,
+                  ),
+                ),
                 trailing: const Icon(Icons.drag_handle),
                 onTap: () => _showHabitDialog(context, habit: h),
               ),
@@ -947,6 +796,118 @@ class _CategoryList extends StatelessWidget {
   final List<HabitCategory> categories;
   const _CategoryList({required this.categories});
 
+  void _showCategoryDialog(BuildContext context, {HabitCategory? cat}) {
+    final nameCtrl = TextEditingController(text: cat?.name ?? "");
+    HSVColor hsvColor = HSVColor.fromColor(cat?.color ?? Colors.blue);
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDS) => AlertDialog(
+          title: Text(cat == null ? "New Tag" : "Edit Tag"),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nameCtrl,
+                  decoration: const InputDecoration(labelText: "Tag Name"),
+                ),
+                const SizedBox(height: 20),
+                const Text(
+                  "Pick Color",
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 10),
+                GestureDetector(
+                  onPanUpdate: (details) {
+                    RenderBox box = context.findRenderObject() as RenderBox;
+                    Offset localOffset = box.globalToLocal(
+                      details.globalPosition,
+                    );
+                    setDS(() {
+                      double s = (localOffset.dx / 200).clamp(0.0, 1.0);
+                      double v = (1.0 - (localOffset.dy / 150)).clamp(0.0, 1.0);
+                      hsvColor = hsvColor.withSaturation(s).withValue(v);
+                    });
+                  },
+                  child: Container(
+                    height: 150,
+                    width: 200,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(8),
+                      gradient: LinearGradient(
+                        colors: [
+                          Colors.white,
+                          hsvColor.withSaturation(1).withValue(1).toColor(),
+                        ],
+                      ),
+                    ),
+                    child: Container(
+                      decoration: const BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [Colors.transparent, Colors.black],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Slider(
+                  value: hsvColor.hue,
+                  min: 0,
+                  max: 360,
+                  activeColor: hsvColor.toColor(),
+                  onChanged: (v) => setDS(() => hsvColor = hsvColor.withHue(v)),
+                ),
+                CircleAvatar(backgroundColor: hsvColor.toColor(), radius: 15),
+              ],
+            ),
+          ),
+          actions: [
+            if (cat != null)
+              TextButton(
+                onPressed: () {
+                  FirebaseFirestore.instance
+                      .collection('categories')
+                      .doc(cat.id)
+                      .delete();
+                  Navigator.pop(context);
+                },
+                child: const Text(
+                  "Delete",
+                  style: TextStyle(color: Colors.red),
+                ),
+              ),
+            ElevatedButton(
+              onPressed: () {
+                if (nameCtrl.text.isNotEmpty) {
+                  final data = {
+                    'name': nameCtrl.text,
+                    'colorValue': hsvColor.toColor().value,
+                  };
+                  if (cat == null)
+                    FirebaseFirestore.instance
+                        .collection('categories')
+                        .add(data);
+                  else
+                    FirebaseFirestore.instance
+                        .collection('categories')
+                        .doc(cat.id)
+                        .update(data);
+                  Navigator.pop(context);
+                }
+              },
+              child: const Text("Save"),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -955,7 +916,12 @@ class _CategoryList extends StatelessWidget {
         itemBuilder: (context, i) => ListTile(
           leading: CircleAvatar(backgroundColor: categories[i].color),
           title: Text(categories[i].name),
+          onLongPress: () => _showCategoryDialog(context, cat: categories[i]),
         ),
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => _showCategoryDialog(context),
+        child: const Icon(Icons.add),
       ),
     );
   }
@@ -973,14 +939,62 @@ class _MoodList extends StatelessWidget {
         if (!snapshot.hasData)
           return const Center(child: CircularProgressIndicator());
         final moods = snapshot.data!.docs;
-        return ListView.builder(
-          itemCount: moods.length,
-          itemBuilder: (context, i) => ListTile(
-            leading: Text(
-              moods[i]['emoji'] ?? '',
-              style: const TextStyle(fontSize: 24),
+        return Scaffold(
+          body: ListView.builder(
+            itemCount: moods.length,
+            itemBuilder: (context, i) => ListTile(
+              leading: Text(
+                moods[i]['emoji'] ?? '?',
+                style: const TextStyle(fontSize: 24),
+              ),
+              title: Text(moods[i]['name'] ?? ''),
+              trailing: IconButton(
+                icon: const Icon(Icons.delete_outline),
+                onPressed: () => FirebaseFirestore.instance
+                    .collection('moods')
+                    .doc(moods[i].id)
+                    .delete(),
+              ),
             ),
-            title: Text(moods[i]['name'] ?? ''),
+          ),
+          floatingActionButton: FloatingActionButton(
+            onPressed: () {
+              final eCtrl = TextEditingController();
+              final nCtrl = TextEditingController();
+              showDialog(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: const Text("New Mood"),
+                  content: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextField(
+                        controller: eCtrl,
+                        decoration: const InputDecoration(labelText: "Emoji"),
+                      ),
+                      TextField(
+                        controller: nCtrl,
+                        decoration: const InputDecoration(labelText: "Name"),
+                      ),
+                    ],
+                  ),
+                  actions: [
+                    ElevatedButton(
+                      onPressed: () {
+                        FirebaseFirestore.instance.collection('moods').add({
+                          'emoji': eCtrl.text,
+                          'name': nCtrl.text,
+                          'order': moods.length,
+                        });
+                        Navigator.pop(context);
+                      },
+                      child: const Text("Add"),
+                    ),
+                  ],
+                ),
+              );
+            },
+            child: const Icon(Icons.add),
           ),
         );
       },
