@@ -1,0 +1,28 @@
+name: Build iOS IPA
+on: [push, workflow_dispatch] # Builds every time you push code OR when you click a button
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+      
+      - name: Install Dependencies
+        run: flutter pub get
+        
+      - name: Build IPA (Unsigned)
+        run: |
+          flutter build ios --release --no-codesign
+          cd build/ios/iphoneos
+          mkdir Payload
+          cp -r Runner.app Payload
+          zip -r Pebbles.ipa Payload
+          
+      - name: Upload App to GitHub
+        uses: actions/upload-artifact@v4
+        with:
+          name: Pebbles-App
+          path: build/ios/iphoneos/Pebbles.ipa
