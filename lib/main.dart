@@ -2,8 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
-import 'dart:convert';
-import 'package:share_plus/share_plus.dart';
 import 'firebase_options.dart';
 
 void main() async {
@@ -139,10 +137,11 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
               .orderBy('order')
               .snapshots(),
           builder: (context, habitSnapshot) {
-            if (!habitSnapshot.hasData)
+            if (!habitSnapshot.hasData) {
               return const Scaffold(
                 body: Center(child: CircularProgressIndicator()),
               );
+            }
             final habits = habitSnapshot.data!.docs.map((doc) {
               final data = doc.data() as Map<String, dynamic>;
               return Habit(
@@ -204,7 +203,7 @@ class HabitCalendarScreen extends StatefulWidget {
 }
 
 class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
-  String _selectedFilterId = 'all'; // 'all', 'alphabetical', or categoryId
+  String _selectedFilterId = 'all';
   final ScrollController _headerHorizontalController = ScrollController();
   final ScrollController _bodyHorizontalController = ScrollController();
   final ScrollController _labelVerticalController = ScrollController();
@@ -285,39 +284,134 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
     final docRef = FirebaseFirestore.instance
         .collection('daily_metrics')
         .doc(dateStr);
-    final moodSnapshot = await FirebaseFirestore.instance
-        .collection('moods')
-        .orderBy('order')
-        .get();
-    final moodsToDisplay = moodSnapshot.docs
-        .map((d) => d.data() as Map<String, dynamic>)
-        .toList();
+    final nameCtrl = TextEditingController();
+    final emojiCtrl = TextEditingController();
+
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Mood"),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: moodsToDisplay.isEmpty
-              ? const Text("No moods added yet. Go to Settings > Moods.")
-              : ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: moodsToDisplay.length,
-                  itemBuilder: (context, i) => ListTile(
-                    leading: Text(
-                      moodsToDisplay[i]['emoji'] ?? '?',
-                      style: const TextStyle(fontSize: 24),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDS) => StreamBuilder<QuerySnapshot>(
+          stream: FirebaseFirestore.instance
+              .collection('moods')
+              .orderBy('order')
+              .snapshots(),
+          builder: (context, snapshot) {
+            if (!snapshot.hasData) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            final moods = snapshot.data!.docs;
+
+            return AlertDialog(
+              title: const Text("Select or Manage Moods"),
+              content: SizedBox(
+                width: double.maxFinite,
+                height: 400,
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        SizedBox(
+                          width: 45,
+                          child: TextField(
+                            controller: emojiCtrl,
+                            decoration: const InputDecoration(
+                              hintText: "😊",
+                              isDense: true,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextField(
+                            controller: nameCtrl,
+                            decoration: const InputDecoration(
+                              hintText: "Mood name",
+                              isDense: true,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(
+                            Icons.add_circle,
+                            color: Colors.blue,
+                          ),
+                          onPressed: () {
+                            if (nameCtrl.text.isNotEmpty) {
+                              FirebaseFirestore.instance
+                                  .collection('moods')
+                                  .add({
+                                    'name': nameCtrl.text,
+                                    'emoji': emojiCtrl.text.isEmpty
+                                        ? "😊"
+                                        : emojiCtrl.text,
+                                    'order': moods.length,
+                                  });
+                              nameCtrl.clear();
+                              emojiCtrl.clear();
+                            }
+                          },
+                        ),
+                      ],
                     ),
-                    title: Text(moodsToDisplay[i]['name'] ?? ''),
-                    onTap: () {
-                      docRef.set({
-                        'mood': moodsToDisplay[i]['name'],
-                        'date': dateStr,
-                      }, SetOptions(merge: true));
-                      Navigator.pop(context);
-                    },
-                  ),
+                    const Divider(),
+                    Expanded(
+                      child: moods.isEmpty
+                          ? const Center(child: Text("No moods yet."))
+                          : ReorderableListView(
+                              shrinkWrap: true,
+                              onReorder: (oldIdx, newIdx) {
+                                if (newIdx > oldIdx) newIdx -= 1;
+                                final list = List<DocumentSnapshot>.from(moods);
+                                final item = list.removeAt(oldIdx);
+                                list.insert(newIdx, item);
+                                for (int i = 0; i < list.length; i++) {
+                                  FirebaseFirestore.instance
+                                      .collection('moods')
+                                      .doc(list[i].id)
+                                      .update({'order': i});
+                                }
+                              },
+                              children: moods.map((m) {
+                                final data = m.data() as Map<String, dynamic>;
+                                return ListTile(
+                                  key: Key(m.id),
+                                  leading: Text(
+                                    data['emoji'] ?? '?',
+                                    style: const TextStyle(fontSize: 22),
+                                  ),
+                                  title: Text(data['name'] ?? ''),
+                                  trailing: const Icon(
+                                    Icons.drag_handle,
+                                    size: 20,
+                                  ),
+                                  onTap: () {
+                                    docRef.set({
+                                      'mood': data['name'],
+                                      'date': dateStr,
+                                    }, SetOptions(merge: true));
+                                    Navigator.pop(context);
+                                  },
+                                  onLongPress: () {
+                                    FirebaseFirestore.instance
+                                        .collection('moods')
+                                        .doc(m.id)
+                                        .delete();
+                                  },
+                                );
+                              }).toList(),
+                            ),
+                    ),
+                  ],
                 ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text("Close"),
+                ),
+              ],
+            );
+          },
         ),
       ),
     );
@@ -371,7 +465,6 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
         .where((h) => h.isVisible)
         .toList();
 
-    // Apply filtering/sorting logic
     if (_selectedFilterId == 'alphabetical') {
       filteredHabits.sort(
         (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
@@ -431,96 +524,107 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
           final metrics = metricSnapshot.hasData
               ? metricSnapshot.data!.docs
               : [];
-          return Column(
-            children: [
-              Container(
-                color: bgColor,
-                child: Row(
-                  children: [
-                    Container(
-                      width: labelWidth,
-                      height: 50,
-                      alignment: Alignment.centerLeft,
-                      padding: const EdgeInsets.only(left: 16),
-                      child: const Text(
-                        "Item",
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                    Expanded(
-                      child: SingleChildScrollView(
-                        controller: _headerHorizontalController,
-                        scrollDirection: Axis.horizontal,
-                        physics: const NeverScrollableScrollPhysics(),
-                        child: Row(
-                          children: List.generate(31, (i) {
-                            final date = DateTime.now().subtract(
-                              Duration(days: i),
-                            );
-                            return Container(
-                              width: cellWidth,
-                              height: 50,
-                              alignment: Alignment.center,
-                              child: Text(
-                                DateFormat('E\nd').format(date),
-                                textAlign: TextAlign.center,
-                                style: const TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            );
-                          }),
+
+          return StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance.collection('moods').snapshots(),
+            builder: (context, moodSnapshot) {
+              final moodsData = moodSnapshot.hasData
+                  ? moodSnapshot.data!.docs
+                  : [];
+
+              return Column(
+                children: [
+                  Container(
+                    color: bgColor,
+                    child: Row(
+                      children: [
+                        Container(
+                          width: labelWidth,
+                          height: 50,
+                          alignment: Alignment.centerLeft,
+                          padding: const EdgeInsets.only(left: 16),
+                          child: const Text(
+                            "Item",
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
                         ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: Row(
-                  children: [
-                    Container(
-                      width: labelWidth,
-                      child: ListView.builder(
-                        controller: _labelVerticalController,
-                        physics: const NeverScrollableScrollPhysics(),
-                        itemCount: filteredHabits.length,
-                        itemBuilder: (context, i) =>
-                            _buildHabitLabel(filteredHabits[i], rowHeight),
-                      ),
-                    ),
-                    Expanded(
-                      child: SingleChildScrollView(
-                        controller: _bodyHorizontalController,
-                        scrollDirection: Axis.horizontal,
-                        child: SizedBox(
-                          width: cellWidth * 31,
-                          child: ListView.builder(
-                            controller: _bodyVerticalController,
-                            itemCount: filteredHabits.length,
-                            itemBuilder: (context, hIdx) => Row(
-                              children: List.generate(
-                                31,
-                                (dayIdx) => SizedBox(
+                        Expanded(
+                          child: SingleChildScrollView(
+                            controller: _headerHorizontalController,
+                            scrollDirection: Axis.horizontal,
+                            physics: const NeverScrollableScrollPhysics(),
+                            child: Row(
+                              children: List.generate(31, (i) {
+                                final date = DateTime.now().subtract(
+                                  Duration(days: i),
+                                );
+                                return Container(
                                   width: cellWidth,
-                                  height: rowHeight,
-                                  child: _buildHabitCell(
-                                    filteredHabits[hIdx],
-                                    dayIdx,
-                                    metrics,
+                                  height: 50,
+                                  alignment: Alignment.center,
+                                  child: Text(
+                                    DateFormat('E\nd').format(date),
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                );
+                              }),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: Row(
+                      children: [
+                        Container(
+                          width: labelWidth,
+                          child: ListView.builder(
+                            controller: _labelVerticalController,
+                            physics: const NeverScrollableScrollPhysics(),
+                            itemCount: filteredHabits.length,
+                            itemBuilder: (context, i) =>
+                                _buildHabitLabel(filteredHabits[i], rowHeight),
+                          ),
+                        ),
+                        Expanded(
+                          child: SingleChildScrollView(
+                            controller: _bodyHorizontalController,
+                            scrollDirection: Axis.horizontal,
+                            child: SizedBox(
+                              width: cellWidth * 31,
+                              child: ListView.builder(
+                                controller: _bodyVerticalController,
+                                itemCount: filteredHabits.length,
+                                itemBuilder: (context, hIdx) => Row(
+                                  children: List.generate(
+                                    31,
+                                    (dayIdx) => SizedBox(
+                                      width: cellWidth,
+                                      height: rowHeight,
+                                      child: _buildHabitCell(
+                                        filteredHabits[hIdx],
+                                        dayIdx,
+                                        metrics,
+                                        moodsData,
+                                      ),
+                                    ),
                                   ),
                                 ),
                               ),
                             ),
                           ),
                         ),
-                      ),
+                      ],
                     ),
-                  ],
-                ),
-              ),
-            ],
+                  ),
+                ],
+              );
+            },
           );
         },
       ),
@@ -559,7 +663,7 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
     );
   }
 
-  Widget _buildHabitCell(Habit h, int dayIdx, List metrics) {
+  Widget _buildHabitCell(Habit h, int dayIdx, List metrics, List moodsData) {
     final dateStr = _getDateStr(dayIdx);
     final dayData =
         metrics
@@ -567,17 +671,30 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
                 .firstWhere((d) => d!.id == dateStr, orElse: () => null)
                 ?.data()
             as Map?;
-    if (h.name == "Mood")
+
+    if (h.name == "Mood") {
+      String? moodName = dayData?['mood'];
+      String displayEmoji = "❔";
+
+      if (moodName != null) {
+        final moodDoc = moodsData.cast<QueryDocumentSnapshot?>().firstWhere(
+          (m) => (m!.data() as Map<String, dynamic>)['name'] == moodName,
+          orElse: () => null,
+        );
+
+        if (moodDoc != null) {
+          final data = moodDoc.data() as Map<String, dynamic>;
+          displayEmoji = data['emoji'] ?? "😊";
+        }
+      }
       return GestureDetector(
         onTap: () => _showMoodDialog(dayIdx),
         child: Center(
-          child: Text(
-            dayData?['mood'] != null ? "😊" : "❔",
-            style: const TextStyle(fontSize: 22),
-          ),
+          child: Text(displayEmoji, style: const TextStyle(fontSize: 22)),
         ),
       );
-    if (h.name == "Sleep")
+    }
+    if (h.name == "Sleep") {
       return GestureDetector(
         onTap: () => _showSleepDialog(dayIdx),
         child: Center(
@@ -587,6 +704,7 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
           ),
         ),
       );
+    }
     if (h.name == "Diary") {
       bool hasVal = dayData?['diary'] != null && dayData?['diary'] != "";
       return IconButton(
@@ -662,7 +780,7 @@ class ManageScreen extends StatelessWidget {
           children: [
             _HabitList(habits: habits, categories: categories),
             _CategoryList(categories: categories),
-            _MoodList(),
+            _MoodSettingsList(),
           ],
         ),
       ),
@@ -729,18 +847,19 @@ class _HabitList extends StatelessWidget {
                   'isStreakHabit': isStreak,
                   'isVisible': isVis,
                 };
-                if (habit == null)
+                if (habit == null) {
                   FirebaseFirestore.instance.collection('habits').add({
                     ...data,
                     'order': habits.length,
                     'isSystem': false,
                     'completionMap': {},
                   });
-                else
+                } else {
                   FirebaseFirestore.instance
                       .collection('habits')
                       .doc(habit.id)
                       .update(data);
+                }
                 Navigator.pop(context);
               },
               child: const Text("Save"),
@@ -760,11 +879,12 @@ class _HabitList extends StatelessWidget {
           final list = List<Habit>.from(habits);
           final item = list.removeAt(oldIdx);
           list.insert(newIdx, item);
-          for (int i = 0; i < list.length; i++)
+          for (int i = 0; i < list.length; i++) {
             FirebaseFirestore.instance
                 .collection('habits')
                 .doc(list[i].id)
                 .update({'order': i});
+          }
         },
         children: habits
             .map(
@@ -888,15 +1008,16 @@ class _CategoryList extends StatelessWidget {
                     'name': nameCtrl.text,
                     'colorValue': hsvColor.toColor().value,
                   };
-                  if (cat == null)
+                  if (cat == null) {
                     FirebaseFirestore.instance
                         .collection('categories')
                         .add(data);
-                  else
+                  } else {
                     FirebaseFirestore.instance
                         .collection('categories')
                         .doc(cat.id)
                         .update(data);
+                  }
                   Navigator.pop(context);
                 }
               },
@@ -927,7 +1048,7 @@ class _CategoryList extends StatelessWidget {
   }
 }
 
-class _MoodList extends StatelessWidget {
+class _MoodSettingsList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<QuerySnapshot>(
@@ -936,68 +1057,84 @@ class _MoodList extends StatelessWidget {
           .orderBy('order')
           .snapshots(),
       builder: (context, snapshot) {
-        if (!snapshot.hasData)
+        if (!snapshot.hasData) {
           return const Center(child: CircularProgressIndicator());
+        }
         final moods = snapshot.data!.docs;
         return Scaffold(
-          body: ListView.builder(
-            itemCount: moods.length,
-            itemBuilder: (context, i) => ListTile(
-              leading: Text(
-                moods[i]['emoji'] ?? '?',
-                style: const TextStyle(fontSize: 24),
-              ),
-              title: Text(moods[i]['name'] ?? ''),
-              trailing: IconButton(
-                icon: const Icon(Icons.delete_outline),
-                onPressed: () => FirebaseFirestore.instance
+          body: ReorderableListView(
+            onReorder: (oldIdx, newIdx) {
+              if (newIdx > oldIdx) newIdx -= 1;
+              final list = List<DocumentSnapshot>.from(moods);
+              final item = list.removeAt(oldIdx);
+              list.insert(newIdx, item);
+              for (int i = 0; i < list.length; i++) {
+                FirebaseFirestore.instance
                     .collection('moods')
-                    .doc(moods[i].id)
+                    .doc(list[i].id)
+                    .update({'order': i});
+              }
+            },
+            children: moods.map((m) {
+              final data = m.data() as Map<String, dynamic>;
+              return ListTile(
+                key: Key(m.id),
+                leading: Text(
+                  data['emoji'] ?? '?',
+                  style: const TextStyle(fontSize: 24),
+                ),
+                title: Text(data['name'] ?? ''),
+                trailing: const Icon(Icons.drag_handle),
+                onLongPress: () => FirebaseFirestore.instance
+                    .collection('moods')
+                    .doc(m.id)
                     .delete(),
-              ),
-            ),
+              );
+            }).toList(),
           ),
           floatingActionButton: FloatingActionButton(
-            onPressed: () {
-              final eCtrl = TextEditingController();
-              final nCtrl = TextEditingController();
-              showDialog(
-                context: context,
-                builder: (context) => AlertDialog(
-                  title: const Text("New Mood"),
-                  content: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      TextField(
-                        controller: eCtrl,
-                        decoration: const InputDecoration(labelText: "Emoji"),
-                      ),
-                      TextField(
-                        controller: nCtrl,
-                        decoration: const InputDecoration(labelText: "Name"),
-                      ),
-                    ],
-                  ),
-                  actions: [
-                    ElevatedButton(
-                      onPressed: () {
-                        FirebaseFirestore.instance.collection('moods').add({
-                          'emoji': eCtrl.text,
-                          'name': nCtrl.text,
-                          'order': moods.length,
-                        });
-                        Navigator.pop(context);
-                      },
-                      child: const Text("Add"),
-                    ),
-                  ],
-                ),
-              );
-            },
+            onPressed: () => _showAddMoodDialog(context, moods.length),
             child: const Icon(Icons.add),
           ),
         );
       },
+    );
+  }
+
+  void _showAddMoodDialog(BuildContext context, int count) {
+    final nameCtrl = TextEditingController();
+    final emojiCtrl = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("New Mood"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: emojiCtrl,
+              decoration: const InputDecoration(labelText: "Emoji"),
+            ),
+            TextField(
+              controller: nameCtrl,
+              decoration: const InputDecoration(labelText: "Name"),
+            ),
+          ],
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () {
+              FirebaseFirestore.instance.collection('moods').add({
+                'name': nameCtrl.text,
+                'emoji': emojiCtrl.text.isEmpty ? "😊" : emojiCtrl.text,
+                'order': count,
+              });
+              Navigator.pop(context);
+            },
+            child: const Text("Add"),
+          ),
+        ],
+      ),
     );
   }
 }
