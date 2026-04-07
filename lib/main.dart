@@ -731,11 +731,23 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
     );
     bool isDone = h.completionMap[dateStr] ?? false;
     return GestureDetector(
-      onTap: () {
+      onTap: () async {
         Map<String, bool> newMap = Map.from(h.completionMap);
-        newMap[dateStr] = !isDone;
-        FirebaseFirestore.instance.collection('habits').doc(h.id).update({
+        bool newValue = !isDone;
+        newMap[dateStr] = newValue;
+
+        // 1. KEEP your existing system
+        await FirebaseFirestore.instance.collection('habits').doc(h.id).update({
           'completionMap': newMap,
+        });
+
+        await FirebaseFirestore.instance.collection('habit_events').add({
+          'userId': 'test_user',
+          'habitId': h.id,
+          'habitName': h.name,
+          'date': dateStr,
+          'completed': newValue, // true OR false
+          'createdAt': FieldValue.serverTimestamp(),
         });
       },
       child: Center(
