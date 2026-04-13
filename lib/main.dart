@@ -149,22 +149,28 @@ class Habit {
   String categoryId;
   Map<String, bool> completionMap;
   int order;
+  int insightOrder;
   bool isSystem;
   bool isVisible;
   bool isFavorite;
   bool showInAnalytics;
+  bool showStreak;
   int backgroundColorValue;
+  String description;
   Habit({
     required this.id,
     required this.name,
     required this.categoryId,
     required this.completionMap,
     required this.order,
+    this.insightOrder = 0,
     this.isSystem = false,
     this.isVisible = true,
     this.isFavorite = false,
     this.showInAnalytics = false,
+    this.showStreak = true,
     this.backgroundColorValue = 0xFFFFFFFF,
+    this.description = "",
   });
 
   int getCount(int days) {
@@ -183,6 +189,10 @@ class Habit {
   int get calculateStreak {
     int streak = 0;
     DateTime date = DateTime.now();
+    // Check if streak started today or yesterday (standard streak logic)
+    if (completionMap[DateFormat('yyyy-MM-dd').format(date)] != true) {
+      date = date.subtract(const Duration(days: 1));
+    }
     while (completionMap[DateFormat('yyyy-MM-dd').format(date)] == true) {
       streak++;
       date = date.subtract(const Duration(days: 1));
@@ -238,11 +248,14 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                 name: d['name'] ?? '',
                 categoryId: d['categoryId'] ?? '',
                 order: d['order'] ?? 0,
+                insightOrder: d['insightOrder'] ?? 0,
                 isSystem: d['isSystem'] ?? false,
                 isVisible: d['isVisible'] ?? true,
                 isFavorite: d['isFavorite'] ?? false,
                 showInAnalytics: d['showInAnalytics'] ?? false,
+                showStreak: d['showStreak'] ?? true,
                 backgroundColorValue: d['backgroundColorValue'] ?? 0xFFFFFFFF,
+                description: d['description'] ?? "",
                 completionMap: Map<String, bool>.from(d['completionMap'] ?? {}),
               );
             }).toList();
@@ -414,23 +427,14 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
   @override
   Widget build(BuildContext context) {
     List<Habit> displayList = widget.habits.where((h) => h.isVisible).toList();
-
-    // --- MULTI-SELECT FILTERING LOGIC ---
     if (!_currentFilters.contains('all')) {
       displayList = displayList.where((h) {
         bool matchesTag = _currentFilters.contains(h.categoryId);
         bool isFavMatch = _currentFilters.contains('favorites') && h.isFavorite;
-
-        // Strictly exclude System habits if we are filtering by specific tags/favorites
-        // but include them if 'favorites' is selected (as per your previous request).
-        if (h.isSystem) {
-          return _currentFilters.contains('favorites');
-        }
-
+        if (h.isSystem) return _currentFilters.contains('favorites');
         return matchesTag || isFavMatch;
       }).toList();
     }
-
     if (_isAlphabetical)
       displayList.sort(
         (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
@@ -459,7 +463,6 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
   Widget _buildFilterMenu() {
     return PopupMenuButton<String>(
       icon: const Icon(Icons.filter_list_rounded),
-      onSelected: (_) {}, // Handled inside itemBuilder
       itemBuilder: (context) => [
         PopupMenuItem(
           enabled: false,
@@ -512,9 +515,9 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
       value: isSelected,
       onChanged: (v) {
         setState(() {
-          if (id == 'all') {
+          if (id == 'all')
             _currentFilters = ['all'];
-          } else {
+          else {
             _currentFilters.remove('all');
             if (v == true)
               _currentFilters.add(id);
@@ -575,9 +578,19 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
   Widget _buildLabelColumn(List<Habit> list) {
     return SizedBox(
       width: 130,
-      child: ListView.builder(
-        controller: _vLabel,
-        physics: const NeverScrollableScrollPhysics(),
+      child: ReorderableListView.builder(
+        scrollController: _vLabel,
+        onReorder: (o, n) {
+          if (n > o) n--;
+          final item = list.removeAt(o);
+          list.insert(n, item);
+          for (int i = 0; i < list.length; i++) {
+            FirebaseFirestore.instance
+                .collection('habits')
+                .doc(list[i].id)
+                .update({'order': i});
+          }
+        },
         itemCount: list.length,
         itemBuilder: (context, i) {
           final h = list[i];
@@ -586,50 +599,63 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
             orElse: () =>
                 HabitCategory(id: '', name: '', color: Colors.transparent),
           );
-          return Container(
-            height: 70,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            alignment: Alignment.centerLeft,
-            decoration: BoxDecoration(
-              border: Border(
-                bottom: BorderSide(color: Colors.grey.withOpacity(0.1)),
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  h.name,
-                  style: const TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    height: 1.1,
-                  ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
+          final streak = h.calculateStreak;
+          return GestureDetector(
+            key: ValueKey(h.id),
+            onLongPress: () => _editHabit(context, h: h),
+            child: Container(
+              height: 70,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              alignment: Alignment.centerLeft,
+              decoration: BoxDecoration(
+                border: Border(
+                  bottom: BorderSide(color: Colors.grey.withOpacity(0.1)),
                 ),
-                if (cat.name.isNotEmpty)
-                  Container(
-                    margin: const EdgeInsets.only(top: 2),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 4,
-                      vertical: 1,
-                    ),
-                    decoration: BoxDecoration(
-                      color: cat.color.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Text(
-                      cat.name,
-                      style: TextStyle(
-                        fontSize: 7,
-                        color: cat.color,
-                        fontWeight: FontWeight.bold,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          h.name,
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            height: 1.1,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (h.showStreak && streak >= 2)
+                        const Text("🔥", style: TextStyle(fontSize: 12)),
+                    ],
+                  ),
+                  if (cat.name.isNotEmpty)
+                    Container(
+                      margin: const EdgeInsets.only(top: 2),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 1,
+                      ),
+                      decoration: BoxDecoration(
+                        color: cat.color.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        cat.name,
+                        style: TextStyle(
+                          fontSize: 7,
+                          color: cat.color,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             ),
           );
         },
@@ -726,7 +752,6 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
         ),
       );
     }
-
     return GestureDetector(
       onTap: () {
         if (h.name == "Mood")
@@ -748,6 +773,7 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
           });
         }
       },
+      onLongPress: () => _showHabitDayNote(h, ds),
       child: Container(
         width: 55,
         height: 70,
@@ -758,6 +784,51 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
           ),
         ),
         child: Center(child: child),
+      ),
+    );
+  }
+
+  void _showHabitDayNote(Habit h, String ds) async {
+    final docId = "${h.id}_$ds";
+    final doc = await FirebaseFirestore.instance
+        .collection('habit_notes')
+        .doc(docId)
+        .get();
+    final ctrl = TextEditingController(text: doc.exists ? doc['note'] : "");
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text("Note: ${h.name} ($ds)"),
+        content: SizedBox(
+          width: 300,
+          height: 180,
+          child: TextField(
+            controller: ctrl,
+            maxLines: 6,
+            minLines: 6,
+            textCapitalization: TextCapitalization.sentences,
+            decoration: const InputDecoration(
+              border: OutlineInputBorder(),
+              hintText: "Add a specific note...",
+            ),
+          ),
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () {
+              FirebaseFirestore.instance
+                  .collection('habit_notes')
+                  .doc(docId)
+                  .set({
+                    'note': ctrl.text,
+                    'habitId': h.id,
+                    'date': ds,
+                  }, SetOptions(merge: true));
+              Navigator.pop(context);
+            },
+            child: const Text("Save"),
+          ),
+        ],
       ),
     );
   }
@@ -799,23 +870,29 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
   }
 
   void _showSleepPicker(String ds, dynamic cur) {
-    final ctrl = TextEditingController(text: cur?.toString() ?? "");
+    final ctrl = TextEditingController(
+      text: cur?.toString().replaceAll('.', ',') ?? "",
+    );
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text("Sleep Hours"),
         content: TextField(
           controller: ctrl,
-          keyboardType: TextInputType.number,
+          keyboardType: const TextInputType.numberWithOptions(
+            decimal: true,
+            signed: true,
+          ),
         ),
         actions: [
           ElevatedButton(
             onPressed: () {
+              String normalized = ctrl.text.replaceAll(',', '.');
               FirebaseFirestore.instance
                   .collection('daily_metrics')
                   .doc(ds)
                   .set({
-                    'sleep': double.tryParse(ctrl.text) ?? 0.0,
+                    'sleep': double.tryParse(normalized) ?? 0.0,
                     'date': ds,
                   }, SetOptions(merge: true));
               Navigator.pop(context);
@@ -833,10 +910,19 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: Text(title),
-        content: TextField(
-          controller: ctrl,
-          maxLines: 6,
-          decoration: const InputDecoration(border: OutlineInputBorder()),
+        content: SizedBox(
+          width: 300,
+          height: 180,
+          child: TextField(
+            controller: ctrl,
+            maxLines: 6,
+            minLines: 6,
+            textCapitalization: TextCapitalization.sentences,
+            decoration: const InputDecoration(
+              border: OutlineInputBorder(),
+              hintText: "Write here...",
+            ),
+          ),
         ),
         actions: [
           ElevatedButton(
@@ -853,17 +939,139 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
       ),
     );
   }
+
+  void _editHabit(BuildContext context, {Habit? h}) {
+    final ctrl = TextEditingController(text: h?.name);
+    final descCtrl = TextEditingController(text: h?.description);
+    String? cat =
+        h?.categoryId ??
+        (widget.categories.isNotEmpty ? widget.categories.first.id : null);
+    bool fav = h?.isFavorite ?? false;
+    bool vis = h?.isVisible ?? true;
+    bool showIns = h?.showInAnalytics ?? false;
+    bool strk = h?.showStreak ?? true;
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDS) => AlertDialog(
+          title: Text(h == null ? "New Habit" : "Edit Habit"),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: ctrl,
+                  decoration: const InputDecoration(labelText: "Habit Name"),
+                ),
+                TextField(
+                  controller: descCtrl,
+                  decoration: const InputDecoration(
+                    labelText: "Description (for AI)",
+                  ),
+                ),
+                DropdownButtonFormField<String>(
+                  value: cat,
+                  items: widget.categories
+                      .map(
+                        (c) =>
+                            DropdownMenuItem(value: c.id, child: Text(c.name)),
+                      )
+                      .toList(),
+                  onChanged: (v) => setDS(() => cat = v),
+                ),
+                SwitchListTile(
+                  title: const Text("Favorite"),
+                  value: fav,
+                  onChanged: (v) => setDS(() => fav = v),
+                ),
+                SwitchListTile(
+                  title: const Text("Visible on Board"),
+                  value: vis,
+                  onChanged: (v) => setDS(() => vis = v),
+                ),
+                SwitchListTile(
+                  title: const Text("Show in Insights"),
+                  value: showIns,
+                  onChanged: (v) => setDS(() => showIns = v),
+                ),
+                SwitchListTile(
+                  title: const Text("Enable Streak"),
+                  value: strk,
+                  onChanged: (v) => setDS(() => strk = v),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            if (h != null && !h.isSystem)
+              TextButton(
+                onPressed: () {
+                  FirebaseFirestore.instance
+                      .collection('habits')
+                      .doc(h.id)
+                      .delete();
+                  Navigator.pop(context);
+                },
+                child: const Text(
+                  "Delete",
+                  style: TextStyle(color: Colors.red),
+                ),
+              ),
+            ElevatedButton(
+              onPressed: () {
+                final d = {
+                  'name': ctrl.text,
+                  'description': descCtrl.text,
+                  'categoryId': cat,
+                  'isFavorite': fav,
+                  'isVisible': vis,
+                  'showInAnalytics': showIns,
+                  'showStreak': strk,
+                };
+                if (h == null)
+                  FirebaseFirestore.instance.collection('habits').add({
+                    ...d,
+                    'order': 99,
+                    'completionMap': {},
+                    'isSystem': false,
+                    'backgroundColorValue': 0xFFFFFFFF,
+                  });
+                else
+                  FirebaseFirestore.instance
+                      .collection('habits')
+                      .doc(h.id)
+                      .update(d);
+                Navigator.pop(context);
+              },
+              child: const Text("Save"),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 // --- INSIGHTS ---
 class InsightsScreen extends StatelessWidget {
   final List<Habit> habits;
   const InsightsScreen({super.key, required this.habits});
+
   @override
   Widget build(BuildContext context) {
     final list = habits.where((h) => h.showInAnalytics).toList();
+    list.sort((a, b) => a.insightOrder.compareTo(b.insightOrder));
+
     return Scaffold(
-      appBar: AppBar(title: const Text("Insights")),
+      appBar: AppBar(
+        title: const Text("Insights"),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.auto_fix_high_rounded),
+            onPressed: () => _manageInsights(context, list),
+          ),
+        ],
+      ),
       body: ListView.builder(
         padding: const EdgeInsets.all(16),
         itemCount: list.length,
@@ -877,21 +1085,12 @@ class InsightsScreen extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    list[i].name,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 18,
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.palette_outlined),
-                    onPressed: () => _showColor(context, list[i]),
-                  ),
-                ],
+              Text(
+                list[i].name,
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 18,
+                ),
               ),
               const SizedBox(height: 15),
               Row(
@@ -899,11 +1098,65 @@ class InsightsScreen extends StatelessWidget {
                 children: [
                   _stat("7 Days", list[i].getCount(7)),
                   _stat("30 Days", list[i].getCount(30)),
-                  _stat("Streak", list[i].calculateStreak),
+                  _stat(
+                    "Streak",
+                    list[i].calculateStreak,
+                    active: list[i].showStreak,
+                  ),
                 ],
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  void _manageInsights(BuildContext context, List<Habit> list) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.7,
+        builder: (context, scroll) => Column(
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text(
+                "Manage Insights Order & Color",
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+              ),
+            ),
+            Expanded(
+              child: ReorderableListView(
+                onReorder: (o, n) {
+                  if (n > o) n--;
+                  final item = list.removeAt(o);
+                  list.insert(n, item);
+                  for (int i = 0; i < list.length; i++) {
+                    FirebaseFirestore.instance
+                        .collection('habits')
+                        .doc(list[i].id)
+                        .update({'insightOrder': i});
+                  }
+                },
+                children: list
+                    .map(
+                      (h) => ListTile(
+                        key: ValueKey(h.id),
+                        title: Text(h.name),
+                        leading: CircleAvatar(
+                          backgroundColor: Color(h.backgroundColorValue),
+                        ),
+                        trailing: const Icon(Icons.drag_handle),
+                        onTap: () => _showColor(context, h),
+                      ),
+                    )
+                    .toList(),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -914,7 +1167,7 @@ class InsightsScreen extends StatelessWidget {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text("Color"),
+        title: const Text("Card Color"),
         content: LucidColorPicker(
           initialColor: sel,
           onColorChanged: (c) => sel = c,
@@ -934,11 +1187,11 @@ class InsightsScreen extends StatelessWidget {
     );
   }
 
-  Widget _stat(String l, int v) => Column(
+  Widget _stat(String l, int v, {bool active = true}) => Column(
     children: [
       Text(l, style: const TextStyle(fontSize: 10, color: Colors.black54)),
       Text(
-        "$v",
+        active ? "$v" : "-",
         style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
       ),
     ],
@@ -1010,16 +1263,42 @@ class _ManageScreenState extends State<ManageScreen>
                     .update({'order': j});
               }
             },
-            children: widget.habits
-                .map(
-                  (h) => ListTile(
-                    key: ValueKey(h.id),
-                    title: Text(h.name),
-                    trailing: const Icon(Icons.drag_handle),
-                    onTap: () => _editHabit(context, h: h),
-                  ),
-                )
-                .toList(),
+            children: widget.habits.map((h) {
+              final cat = widget.categories.firstWhere(
+                (c) => c.id == h.categoryId,
+                orElse: () =>
+                    HabitCategory(id: '', name: 'No Tag', color: Colors.grey),
+              );
+              return ListTile(
+                key: ValueKey(h.id),
+                title: Row(
+                  children: [
+                    Text(h.name),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: cat.color.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        cat.name,
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: cat.color,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                trailing: const Icon(Icons.drag_handle),
+                onTap: () => _editHabit(context, h: h),
+              );
+            }).toList(),
           ),
           ListView(
             children: widget.categories
@@ -1040,43 +1319,63 @@ class _ManageScreenState extends State<ManageScreen>
 
   void _editHabit(BuildContext context, {Habit? h}) {
     final ctrl = TextEditingController(text: h?.name);
+    final descCtrl = TextEditingController(text: h?.description);
     String? cat =
         h?.categoryId ??
         (widget.categories.isNotEmpty ? widget.categories.first.id : null);
     bool fav = h?.isFavorite ?? false;
     bool vis = h?.isVisible ?? true;
+    bool showIns = h?.showInAnalytics ?? false;
+    bool strk = h?.showStreak ?? true;
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDS) => AlertDialog(
           title: Text(h == null ? "New" : "Edit"),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: ctrl,
-                decoration: const InputDecoration(labelText: "Name"),
-              ),
-              DropdownButtonFormField<String>(
-                value: cat,
-                items: widget.categories
-                    .map(
-                      (c) => DropdownMenuItem(value: c.id, child: Text(c.name)),
-                    )
-                    .toList(),
-                onChanged: (v) => setDS(() => cat = v),
-              ),
-              SwitchListTile(
-                title: const Text("Favorite"),
-                value: fav,
-                onChanged: (v) => setDS(() => fav = v),
-              ),
-              SwitchListTile(
-                title: const Text("Visible"),
-                value: vis,
-                onChanged: (v) => setDS(() => vis = v),
-              ),
-            ],
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: ctrl,
+                  decoration: const InputDecoration(labelText: "Name"),
+                ),
+                TextField(
+                  controller: descCtrl,
+                  decoration: const InputDecoration(labelText: "Description"),
+                ),
+                DropdownButtonFormField<String>(
+                  value: cat,
+                  items: widget.categories
+                      .map(
+                        (c) =>
+                            DropdownMenuItem(value: c.id, child: Text(c.name)),
+                      )
+                      .toList(),
+                  onChanged: (v) => setDS(() => cat = v),
+                ),
+                SwitchListTile(
+                  title: const Text("Favorite"),
+                  value: fav,
+                  onChanged: (v) => setDS(() => fav = v),
+                ),
+                SwitchListTile(
+                  title: const Text("Visible"),
+                  value: vis,
+                  onChanged: (v) => setDS(() => vis = v),
+                ),
+                SwitchListTile(
+                  title: const Text("Insights"),
+                  value: showIns,
+                  onChanged: (v) => setDS(() => showIns = v),
+                ),
+                SwitchListTile(
+                  title: const Text("Streak"),
+                  value: strk,
+                  onChanged: (v) => setDS(() => strk = v),
+                ),
+              ],
+            ),
           ),
           actions: [
             if (h != null && !h.isSystem)
@@ -1097,18 +1396,20 @@ class _ManageScreenState extends State<ManageScreen>
               onPressed: () {
                 final d = {
                   'name': ctrl.text,
+                  'description': descCtrl.text,
                   'categoryId': cat,
                   'isFavorite': fav,
                   'isVisible': vis,
+                  'showInAnalytics': showIns,
+                  'showStreak': strk,
                 };
                 if (h == null)
                   FirebaseFirestore.instance.collection('habits').add({
                     ...d,
-                    'order': widget.habits.length,
+                    'order': 99,
                     'completionMap': {},
                     'isSystem': false,
                     'backgroundColorValue': 0xFFFFFFFF,
-                    'showInAnalytics': false,
                   });
                 else
                   FirebaseFirestore.instance
