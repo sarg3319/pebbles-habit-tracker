@@ -29,6 +29,7 @@ class PebblesApp extends StatelessWidget {
             fontSize: 22,
             fontWeight: FontWeight.bold,
           ),
+          iconTheme: IconThemeData(color: Colors.black),
         ),
       ),
       home: const MainNavigationScreen(),
@@ -36,7 +37,7 @@ class PebblesApp extends StatelessWidget {
   }
 }
 
-// --- FIXED LUCID COLOR PICKER ---
+// --- COLOR PICKER ---
 class LucidColorPicker extends StatefulWidget {
   final Color initialColor;
   final ValueChanged<Color> onColorChanged;
@@ -45,14 +46,12 @@ class LucidColorPicker extends StatefulWidget {
     required this.initialColor,
     required this.onColorChanged,
   });
-
   @override
   State<LucidColorPicker> createState() => _LucidColorPickerState();
 }
 
 class _LucidColorPickerState extends State<LucidColorPicker> {
   late HSVColor hsvColor;
-
   @override
   void initState() {
     super.initState();
@@ -115,12 +114,6 @@ class _LucidColorPickerState extends State<LucidColorPicker> {
                       shape: BoxShape.circle,
                       border: Border.all(color: Colors.white, width: 3),
                       color: hsvColor.toColor(),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.2),
-                          blurRadius: 4,
-                        ),
-                      ],
                     ),
                   ),
                 ),
@@ -128,20 +121,10 @@ class _LucidColorPickerState extends State<LucidColorPicker> {
             ),
           ),
         ),
-        const SizedBox(height: 20),
-        const Text(
-          "Hue Selection",
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.bold,
-            color: Colors.grey,
-          ),
-        ),
         Slider(
           value: hsvColor.hue,
           min: 0,
           max: 360,
-          activeColor: Colors.blueGrey,
           onChanged: (v) => setState(() {
             hsvColor = hsvColor.withHue(v);
             widget.onColorChanged(hsvColor.toColor());
@@ -152,7 +135,7 @@ class _LucidColorPickerState extends State<LucidColorPicker> {
   }
 }
 
-// --- DATA MODELS ---
+// --- MODELS ---
 class HabitCategory {
   final String id;
   final String name;
@@ -163,28 +146,19 @@ class HabitCategory {
 class Habit {
   String id;
   String name;
-  String description;
   String categoryId;
   Map<String, bool> completionMap;
-  Map<String, String> notesMap;
-  bool isStreakHabit;
-  bool hasNotes;
   int order;
   bool isSystem;
   bool isVisible;
   bool isFavorite;
   bool showInAnalytics;
   int backgroundColorValue;
-
   Habit({
     required this.id,
     required this.name,
-    this.description = "",
     required this.categoryId,
     required this.completionMap,
-    this.notesMap = const {},
-    required this.isStreakHabit,
-    required this.hasNotes,
     required this.order,
     this.isSystem = false,
     this.isVisible = true,
@@ -193,26 +167,15 @@ class Habit {
     this.backgroundColorValue = 0xFFFFFFFF,
   });
 
-  int getWeeklyCount() {
+  int getCount(int days) {
     int count = 0;
     DateTime now = DateTime.now();
-    for (int i = 0; i < 7; i++) {
-      String ds = DateFormat(
-        'yyyy-MM-dd',
-      ).format(now.subtract(Duration(days: i)));
-      if (completionMap[ds] == true) count++;
-    }
-    return count;
-  }
-
-  int getMonthlyCount() {
-    int count = 0;
-    DateTime now = DateTime.now();
-    for (int i = 0; i < 30; i++) {
-      String ds = DateFormat(
-        'yyyy-MM-dd',
-      ).format(now.subtract(Duration(days: i)));
-      if (completionMap[ds] == true) count++;
+    for (int i = 0; i < days; i++) {
+      if (completionMap[DateFormat(
+            'yyyy-MM-dd',
+          ).format(now.subtract(Duration(days: i)))] ==
+          true)
+        count++;
     }
     return count;
   }
@@ -228,7 +191,7 @@ class Habit {
   }
 }
 
-// --- MAIN NAVIGATION ---
+// --- NAVIGATION ---
 class MainNavigationScreen extends StatefulWidget {
   const MainNavigationScreen({super.key});
   @override
@@ -237,6 +200,7 @@ class MainNavigationScreen extends StatefulWidget {
 
 class _MainNavigationScreenState extends State<MainNavigationScreen> {
   int _selectedIndex = 0;
+  List<String> _selectedFilters = ['all'];
 
   @override
   Widget build(BuildContext context) {
@@ -245,48 +209,41 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
           .collection('categories')
           .orderBy('name')
           .snapshots(),
-      builder: (context, catSnapshot) {
-        List<HabitCategory> categories = catSnapshot.hasData
-            ? catSnapshot.data!.docs.map((doc) {
-                final data = doc.data() as Map<String, dynamic>;
-                return HabitCategory(
-                  id: doc.id,
-                  name: data['name'] ?? 'Untitled',
-                  color: Color(data['colorValue'] ?? Colors.blue.value),
-                );
-              }).toList()
-            : [];
-
+      builder: (context, catSnap) {
+        final categories = catSnap.hasData
+            ? catSnap.data!.docs
+                  .map(
+                    (doc) => HabitCategory(
+                      id: doc.id,
+                      name: doc['name'],
+                      color: Color(doc['colorValue']),
+                    ),
+                  )
+                  .toList()
+            : <HabitCategory>[];
         return StreamBuilder<QuerySnapshot>(
           stream: FirebaseFirestore.instance
               .collection('habits')
               .orderBy('order')
               .snapshots(),
-          builder: (context, habitSnapshot) {
-            if (!habitSnapshot.hasData)
+          builder: (context, habitSnap) {
+            if (!habitSnap.hasData)
               return const Scaffold(
                 body: Center(child: CircularProgressIndicator()),
               );
-            final habits = habitSnapshot.data!.docs.map((doc) {
-              final data = doc.data() as Map<String, dynamic>;
+            final habits = habitSnap.data!.docs.map((doc) {
+              final d = doc.data() as Map<String, dynamic>;
               return Habit(
                 id: doc.id,
-                name: data['name'] ?? '',
-                description: data['description'] ?? '',
-                categoryId: data['categoryId'] ?? '',
-                isStreakHabit: data['isStreakHabit'] ?? false,
-                hasNotes: data['hasNotes'] ?? false,
-                order: data['order'] ?? 0,
-                isSystem: data['isSystem'] ?? false,
-                isVisible: data['isVisible'] ?? true,
-                isFavorite: data['isFavorite'] ?? false,
-                showInAnalytics: data['showInAnalytics'] ?? false,
-                backgroundColorValue:
-                    data['backgroundColorValue'] ?? 0xFFFFFFFF,
-                completionMap: Map<String, bool>.from(
-                  data['completionMap'] ?? {},
-                ),
-                notesMap: Map<String, String>.from(data['notesMap'] ?? {}),
+                name: d['name'] ?? '',
+                categoryId: d['categoryId'] ?? '',
+                order: d['order'] ?? 0,
+                isSystem: d['isSystem'] ?? false,
+                isVisible: d['isVisible'] ?? true,
+                isFavorite: d['isFavorite'] ?? false,
+                showInAnalytics: d['showInAnalytics'] ?? false,
+                backgroundColorValue: d['backgroundColorValue'] ?? 0xFFFFFFFF,
+                completionMap: Map<String, bool>.from(d['completionMap'] ?? {}),
               );
             }).toList();
 
@@ -294,11 +251,18 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
               body: IndexedStack(
                 index: _selectedIndex,
                 children: [
-                  CategoryHomeScreen(habits: habits, categories: categories),
+                  CategoryHomeScreen(
+                    onCategoryTap: (id) => setState(() {
+                      _selectedFilters = [id];
+                      _selectedIndex = 1;
+                    }),
+                    habits: habits,
+                    categories: categories,
+                  ),
                   HabitCalendarScreen(
                     habits: habits,
                     categories: categories,
-                    initialFilterId: 'all',
+                    initialFilters: _selectedFilters,
                   ),
                   InsightsScreen(habits: habits),
                   ManageScreen(habits: habits, categories: categories),
@@ -307,7 +271,10 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
               bottomNavigationBar: BottomNavigationBar(
                 currentIndex: _selectedIndex,
                 type: BottomNavigationBarType.fixed,
-                onTap: (index) => setState(() => _selectedIndex = index),
+                onTap: (i) => setState(() {
+                  _selectedIndex = i;
+                  if (i != 1) _selectedFilters = ['all'];
+                }),
                 items: const [
                   BottomNavigationBarItem(
                     icon: Icon(Icons.home_rounded),
@@ -335,151 +302,14 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   }
 }
 
-// --- INSIGHTS ---
-class InsightsScreen extends StatelessWidget {
-  final List<Habit> habits;
-  const InsightsScreen({super.key, required this.habits});
-
-  void _showInsightSettings(BuildContext context, Habit h) {
-    Color selectedColor = Color(h.backgroundColorValue);
-    bool show = h.showInAnalytics;
-
-    showDialog(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDS) => AlertDialog(
-          title: Text("Module Color: ${h.name}"),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min, // Fixed: Corrected MainAxisSize
-              children: [
-                LucidColorPicker(
-                  initialColor: selectedColor,
-                  onColorChanged: (c) => selectedColor = c,
-                ),
-                const SizedBox(height: 10),
-                SwitchListTile(
-                  title: const Text("Show in Insights"),
-                  value: show,
-                  onChanged: (v) => setDS(() => show = v),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text("Cancel"),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                FirebaseFirestore.instance
-                    .collection('habits')
-                    .doc(h.id)
-                    .update({
-                      'backgroundColorValue': selectedColor.value,
-                      'showInAnalytics': show,
-                    });
-                Navigator.pop(context);
-              },
-              child: const Text("Apply"),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final analyticsHabits = habits.where((h) => h.showInAnalytics).toList();
-    return Scaffold(
-      appBar: AppBar(title: const Text("Insights")),
-      body: analyticsHabits.isEmpty
-          ? const Center(
-              child: Text("Enable 'Insights' for habits in Settings"),
-            )
-          : ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: analyticsHabits.length,
-              itemBuilder: (context, i) {
-                final h = analyticsHabits[i];
-                return Container(
-                  margin: const EdgeInsets.only(bottom: 16),
-                  padding: const EdgeInsets.all(24),
-                  decoration: BoxDecoration(
-                    color: Color(h.backgroundColorValue),
-                    borderRadius: BorderRadius.circular(28),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.03),
-                        blurRadius: 10,
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            h.name,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 20,
-                            ),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.palette_outlined),
-                            onPressed: () => _showInsightSettings(context, h),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 20),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceAround,
-                        children: [
-                          _analyticItem("7 Days", h.getWeeklyCount()),
-                          _analyticItem("30 Days", h.getMonthlyCount()),
-                          _analyticItem("Streak", h.calculateStreak),
-                        ],
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
-    );
-  }
-
-  Widget _analyticItem(String label, int value) {
-    return Column(
-      children: [
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.bold,
-            color: Colors.black54,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          "$value",
-          style: const TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
-        ),
-      ],
-    );
-  }
-}
-
-// --- HOME SCREEN ---
+// --- HOME ---
 class CategoryHomeScreen extends StatelessWidget {
+  final Function(String) onCategoryTap;
   final List<Habit> habits;
   final List<HabitCategory> categories;
   const CategoryHomeScreen({
     super.key,
+    required this.onCategoryTap,
     required this.habits,
     required this.categories,
   });
@@ -488,56 +318,38 @@ class CategoryHomeScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text("Pebbles")),
-      body: Padding(
-        padding: const EdgeInsets.all(20.0),
-        child: GridView(
-          gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-            maxCrossAxisExtent: 160,
-            mainAxisSpacing: 16,
-            crossAxisSpacing: 16,
-            childAspectRatio: 1.0,
-          ),
-          children: [
-            _buildCatCard(
-              context,
-              "Favorites",
-              Colors.red,
-              Icons.favorite_rounded,
-              'favorites',
-            ),
-            ...categories.map(
-              (cat) => _buildCatCard(
-                context,
-                cat.name,
-                cat.color,
-                Icons.label_rounded,
-                cat.id,
-              ),
-            ),
-          ],
+      body: GridView(
+        padding: const EdgeInsets.all(20),
+        gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+          maxCrossAxisExtent: 160,
+          mainAxisSpacing: 16,
+          crossAxisSpacing: 16,
         ),
+        children: [
+          _card(
+            context,
+            "Favorites",
+            Colors.red,
+            Icons.favorite_rounded,
+            'favorites',
+          ),
+          ...categories.map(
+            (c) => _card(context, c.name, c.color, Icons.label_rounded, c.id),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _buildCatCard(
+  Widget _card(
     BuildContext context,
     String title,
     Color color,
     IconData icon,
-    String filterId,
+    String id,
   ) {
     return GestureDetector(
-      onTap: () => Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => HabitCalendarScreen(
-            habits: habits,
-            categories: categories,
-            initialFilterId: filterId,
-          ),
-        ),
-      ),
+      onTap: () => onCategoryTap(id),
       child: Container(
         decoration: BoxDecoration(
           color: color.withOpacity(0.08),
@@ -547,8 +359,8 @@ class CategoryHomeScreen extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, color: color, size: 32),
-            const SizedBox(height: 10),
+            Icon(icon, color: color, size: 30),
+            const SizedBox(height: 8),
             Text(
               title,
               style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
@@ -560,24 +372,24 @@ class CategoryHomeScreen extends StatelessWidget {
   }
 }
 
-// --- THE BOARD (CALENDAR) ---
+// --- BOARD ---
 class HabitCalendarScreen extends StatefulWidget {
   final List<Habit> habits;
   final List<HabitCategory> categories;
-  final String initialFilterId;
+  final List<String> initialFilters;
   const HabitCalendarScreen({
     super.key,
     required this.habits,
     required this.categories,
-    required this.initialFilterId,
+    required this.initialFilters,
   });
-
   @override
   State<HabitCalendarScreen> createState() => _HabitCalendarScreenState();
 }
 
 class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
-  late String _selectedFilterId;
+  late List<String> _currentFilters;
+  bool _isAlphabetical = false;
   final ScrollController _hHead = ScrollController();
   final ScrollController _hBody = ScrollController();
   final ScrollController _vLabel = ScrollController();
@@ -586,330 +398,408 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
   @override
   void initState() {
     super.initState();
-    _selectedFilterId = widget.initialFilterId;
+    _currentFilters = List.from(widget.initialFilters);
     _hBody.addListener(() => _hHead.jumpTo(_hBody.offset));
     _vBody.addListener(() => _vLabel.jumpTo(_vBody.offset));
   }
 
   @override
+  void didUpdateWidget(HabitCalendarScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.initialFilters != oldWidget.initialFilters) {
+      _currentFilters = List.from(widget.initialFilters);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    List<Habit> filtered = widget.habits.where((h) => h.isVisible).toList();
-    if (_selectedFilterId == 'favorites') {
-      filtered = filtered.where((h) => h.isFavorite || h.isSystem).toList();
-    } else if (_selectedFilterId != 'all') {
-      filtered = filtered
-          .where((h) => h.categoryId == _selectedFilterId || h.isSystem)
-          .toList();
+    List<Habit> displayList = widget.habits.where((h) => h.isVisible).toList();
+
+    // --- MULTI-SELECT FILTERING LOGIC ---
+    if (!_currentFilters.contains('all')) {
+      displayList = displayList.where((h) {
+        bool matchesTag = _currentFilters.contains(h.categoryId);
+        bool isFavMatch = _currentFilters.contains('favorites') && h.isFavorite;
+
+        // Strictly exclude System habits if we are filtering by specific tags/favorites
+        // but include them if 'favorites' is selected (as per your previous request).
+        if (h.isSystem) {
+          return _currentFilters.contains('favorites');
+        }
+
+        return matchesTag || isFavMatch;
+      }).toList();
     }
 
+    if (_isAlphabetical)
+      displayList.sort(
+        (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+      );
+    else
+      displayList.sort((a, b) => a.order.compareTo(b.order));
+
     return Scaffold(
-      appBar: AppBar(title: const Text("Board")),
-      body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance
-            .collection('daily_metrics')
-            .snapshots(),
-        builder: (context, metricSnap) {
-          final metrics = metricSnap.hasData ? metricSnap.data!.docs : [];
-          return StreamBuilder<QuerySnapshot>(
-            stream: FirebaseFirestore.instance
-                .collection('moods')
-                .orderBy('order')
-                .snapshots(),
-            builder: (context, moodSnap) {
-              final moods = moodSnap.hasData ? moodSnap.data!.docs : [];
+      appBar: AppBar(title: const Text("Board"), actions: [_buildFilterMenu()]),
+      body: Column(
+        children: [
+          _buildHeaderRow(),
+          Expanded(
+            child: Row(
+              children: [
+                _buildLabelColumn(displayList),
+                Expanded(child: _buildGridBody(displayList)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFilterMenu() {
+    return PopupMenuButton<String>(
+      icon: const Icon(Icons.filter_list_rounded),
+      onSelected: (_) {}, // Handled inside itemBuilder
+      itemBuilder: (context) => [
+        PopupMenuItem(
+          enabled: false,
+          child: StatefulBuilder(
+            builder: (context, setPopupState) {
               return Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Row(
-                    children: [
-                      Container(
-                        width: 130,
-                        height: 50,
-                        padding: const EdgeInsets.only(left: 16),
-                        alignment: Alignment.centerLeft,
-                        child: const Text(
-                          "Item",
-                          style: TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                      Expanded(
-                        child: SingleChildScrollView(
-                          controller: _hHead,
-                          scrollDirection: Axis.horizontal,
-                          physics: const NeverScrollableScrollPhysics(),
-                          child: Row(
-                            children: List.generate(
-                              31,
-                              (i) => Container(
-                                width: 55,
-                                height: 50,
-                                alignment: Alignment.center,
-                                child: Text(
-                                  DateFormat('dd\nE').format(
-                                    DateTime.now().subtract(Duration(days: i)),
-                                  ),
-                                  style: const TextStyle(
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.bold,
-                                    height: 1.2,
-                                  ),
-                                  textAlign: TextAlign.center,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  Expanded(
-                    child: Row(
-                      children: [
-                        SizedBox(
-                          width: 130,
-                          child: ListView.builder(
-                            controller: _vLabel,
-                            physics: const NeverScrollableScrollPhysics(),
-                            itemCount: filtered.length,
-                            itemBuilder: (context, i) {
-                              final h = filtered[i];
-                              final cat = widget.categories.firstWhere(
-                                (c) => c.id == h.categoryId,
-                                orElse: () => HabitCategory(
-                                  id: '',
-                                  name: '',
-                                  color: Colors.transparent,
-                                ),
-                              );
-                              return Container(
-                                height: 70,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                ),
-                                alignment: Alignment.centerLeft,
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Text(
-                                      h.name,
-                                      style: const TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                    if (cat.name.isNotEmpty)
-                                      Container(
-                                        margin: const EdgeInsets.only(top: 2),
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 4,
-                                          vertical: 1,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: cat.color.withOpacity(0.15),
-                                          borderRadius: BorderRadius.circular(
-                                            4,
-                                          ),
-                                        ),
-                                        child: Text(
-                                          cat.name,
-                                          style: TextStyle(
-                                            fontSize: 8,
-                                            color: cat.color,
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                      ),
-                                  ],
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-                        Expanded(
-                          child: SingleChildScrollView(
-                            controller: _hBody,
-                            scrollDirection: Axis.horizontal,
-                            child: SizedBox(
-                              width: 31 * 55,
-                              child: ListView.builder(
-                                controller: _vBody,
-                                itemCount: filtered.length,
-                                itemBuilder: (context, hIdx) => Row(
-                                  children: List.generate(
-                                    31,
-                                    (dIdx) => _buildGridCell(
-                                      filtered[hIdx],
-                                      dIdx,
-                                      metrics,
-                                      moods,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
+                  const Text(
+                    "Sort",
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.grey,
                     ),
+                  ),
+                  CheckboxListTile(
+                    title: const Text("Alphabetical"),
+                    value: _isAlphabetical,
+                    onChanged: (v) {
+                      setState(() => _isAlphabetical = v!);
+                      setPopupState(() {});
+                    },
+                  ),
+                  const Divider(),
+                  const Text(
+                    "Tags",
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.grey,
+                    ),
+                  ),
+                  _popupCheckItem("All", "all", setPopupState),
+                  _popupCheckItem("Favorites", "favorites", setPopupState),
+                  ...widget.categories.map(
+                    (c) => _popupCheckItem(c.name, c.id, setPopupState),
                   ),
                 ],
               );
             },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _popupCheckItem(String label, String id, StateSetter setPopupState) {
+    bool isSelected = _currentFilters.contains(id);
+    return CheckboxListTile(
+      title: Text(label),
+      value: isSelected,
+      onChanged: (v) {
+        setState(() {
+          if (id == 'all') {
+            _currentFilters = ['all'];
+          } else {
+            _currentFilters.remove('all');
+            if (v == true)
+              _currentFilters.add(id);
+            else
+              _currentFilters.remove(id);
+            if (_currentFilters.isEmpty) _currentFilters = ['all'];
+          }
+        });
+        setPopupState(() {});
+      },
+    );
+  }
+
+  Widget _buildHeaderRow() {
+    return Row(
+      children: [
+        Container(
+          width: 130,
+          height: 40,
+          padding: const EdgeInsets.only(left: 16),
+          alignment: Alignment.centerLeft,
+          child: const Text(
+            "Item",
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+          ),
+        ),
+        Expanded(
+          child: SingleChildScrollView(
+            controller: _hHead,
+            scrollDirection: Axis.horizontal,
+            physics: const NeverScrollableScrollPhysics(),
+            child: Row(
+              children: List.generate(
+                31,
+                (i) => Container(
+                  width: 55,
+                  height: 40,
+                  alignment: Alignment.center,
+                  child: Text(
+                    DateFormat(
+                      'dd\nE',
+                    ).format(DateTime.now().subtract(Duration(days: i))),
+                    style: const TextStyle(
+                      fontSize: 9,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildLabelColumn(List<Habit> list) {
+    return SizedBox(
+      width: 130,
+      child: ListView.builder(
+        controller: _vLabel,
+        physics: const NeverScrollableScrollPhysics(),
+        itemCount: list.length,
+        itemBuilder: (context, i) {
+          final h = list[i];
+          final cat = widget.categories.firstWhere(
+            (c) => c.id == h.categoryId,
+            orElse: () =>
+                HabitCategory(id: '', name: '', color: Colors.transparent),
+          );
+          return Container(
+            height: 70,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            alignment: Alignment.centerLeft,
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(color: Colors.grey.withOpacity(0.1)),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  h.name,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    height: 1.1,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                if (cat.name.isNotEmpty)
+                  Container(
+                    margin: const EdgeInsets.only(top: 2),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 4,
+                      vertical: 1,
+                    ),
+                    decoration: BoxDecoration(
+                      color: cat.color.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      cat.name,
+                      style: TextStyle(
+                        fontSize: 7,
+                        color: cat.color,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           );
         },
       ),
     );
   }
 
-  Widget _buildGridCell(Habit h, int dIdx, List metrics, List moods) {
+  Widget _buildGridBody(List<Habit> list) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('daily_metrics')
+          .snapshots(),
+      builder: (context, mSnap) {
+        final metrics = mSnap.hasData ? mSnap.data!.docs : [];
+        return StreamBuilder<QuerySnapshot>(
+          stream: FirebaseFirestore.instance
+              .collection('moods')
+              .orderBy('order')
+              .snapshots(),
+          builder: (context, moodSnap) {
+            final moods = moodSnap.hasData ? moodSnap.data!.docs : [];
+            return SingleChildScrollView(
+              controller: _hBody,
+              scrollDirection: Axis.horizontal,
+              child: SizedBox(
+                width: 31 * 55,
+                child: ListView.builder(
+                  controller: _vBody,
+                  itemCount: list.length,
+                  itemBuilder: (context, hIdx) => Row(
+                    children: List.generate(
+                      31,
+                      (dIdx) => _gridCell(list[hIdx], dIdx, metrics, moods),
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _gridCell(Habit h, int dIdx, List metrics, List moods) {
     final ds = DateFormat(
       'yyyy-MM-dd',
     ).format(DateTime.now().subtract(Duration(days: dIdx)));
-
-    // SAFE FIND: Avoiding TypeErrors
-    Map? dayData;
+    Map? data;
     for (var m in metrics) {
       if (m.id == ds) {
-        dayData = m.data() as Map?;
+        data = m.data() as Map?;
         break;
       }
     }
-
+    Widget child = const SizedBox();
     if (h.name == "Mood") {
       String emoji = "❔";
-      if (dayData?['mood'] != null) {
+      if (data?['mood'] != null) {
         for (var m in moods) {
-          if (m['name'] == dayData?['mood']) {
+          if (m['name'] == data?['mood']) {
             emoji = m['emoji'];
             break;
           }
         }
       }
-      return GestureDetector(
-        onTap: () => _showMoodPicker(ds, moods),
-        child: Container(
-          width: 55,
-          height: 70,
-          decoration: _cellBorder(),
-          child: Center(
-            child: Text(emoji, style: const TextStyle(fontSize: 22)),
-          ),
+      child = Text(emoji, style: const TextStyle(fontSize: 22));
+    } else if (h.name == "Sleep") {
+      child = Text(
+        "${data?['sleep'] ?? '-'}",
+        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+      );
+    } else if (h.name == "Diary" || h.name == "Dreams") {
+      bool hasText = data?[h.name.toLowerCase()]?.isNotEmpty ?? false;
+      child = Icon(
+        h.name == "Diary" ? Icons.book : Icons.cloud,
+        size: 18,
+        color: hasText ? Colors.blue : Colors.grey[100],
+      );
+    } else {
+      bool isDone = h.completionMap[ds] ?? false;
+      final color = widget.categories
+          .firstWhere(
+            (c) => c.id == h.categoryId,
+            orElse: () => HabitCategory(id: '', name: '', color: Colors.blue),
+          )
+          .color;
+      child = Container(
+        width: 24,
+        height: 24,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: isDone ? color : Colors.grey[100],
         ),
       );
     }
-
-    if (h.name == "Sleep") {
-      return GestureDetector(
-        onTap: () => _showSleepEntry(ds, dayData?['sleep']),
-        child: Container(
-          width: 55,
-          height: 70,
-          decoration: _cellBorder(),
-          child: Center(
-            child: Text(
-              dayData?['sleep']?.toString() ?? "-",
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
-          ),
-        ),
-      );
-    }
-
-    if (h.name == "Diary" || h.name == "Dreams") {
-      bool hasText = dayData?[h.name.toLowerCase()]?.isNotEmpty ?? false;
-      return GestureDetector(
-        onTap: () => _showTextEntry(
-          h.name,
-          h.name.toLowerCase(),
-          ds,
-          dayData?[h.name.toLowerCase()] ?? "",
-        ),
-        child: Container(
-          width: 55,
-          height: 70,
-          decoration: _cellBorder(),
-          child: Icon(
-            h.name == "Diary" ? Icons.book : Icons.cloud,
-            color: hasText ? Colors.blue : Colors.grey[200],
-          ),
-        ),
-      );
-    }
-
-    bool isDone = h.completionMap[ds] ?? false;
-    final cat = widget.categories.firstWhere(
-      (c) => c.id == h.categoryId,
-      orElse: () => HabitCategory(id: '', name: '', color: Colors.blue),
-    );
 
     return GestureDetector(
       onTap: () {
-        Map<String, bool> newMap = Map.from(h.completionMap);
-        newMap[ds] = !isDone;
-        FirebaseFirestore.instance.collection('habits').doc(h.id).update({
-          'completionMap': newMap,
-        });
+        if (h.name == "Mood")
+          _showMoodPicker(ds, moods);
+        else if (h.name == "Sleep")
+          _showSleepPicker(ds, data?['sleep']);
+        else if (h.name == "Diary" || h.name == "Dreams")
+          _showTextPicker(
+            h.name,
+            h.name.toLowerCase(),
+            ds,
+            data?[h.name.toLowerCase()] ?? "",
+          );
+        else {
+          Map<String, bool> next = Map.from(h.completionMap);
+          next[ds] = !(h.completionMap[ds] ?? false);
+          FirebaseFirestore.instance.collection('habits').doc(h.id).update({
+            'completionMap': next,
+          });
+        }
       },
       child: Container(
         width: 55,
         height: 70,
-        decoration: _cellBorder(),
-        child: Center(
-          child: Container(
-            width: 26,
-            height: 26,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: isDone ? cat.color : Colors.grey[100],
-            ),
+        decoration: BoxDecoration(
+          border: Border(
+            bottom: BorderSide(color: Colors.grey.withOpacity(0.1)),
+            right: BorderSide(color: Colors.grey.withOpacity(0.1)),
           ),
         ),
+        child: Center(child: child),
       ),
     );
   }
-
-  BoxDecoration _cellBorder() => BoxDecoration(
-    border: Border(
-      bottom: BorderSide(color: Colors.grey.withOpacity(0.1)),
-      right: BorderSide(color: Colors.grey.withOpacity(0.1)),
-    ),
-  );
 
   void _showMoodPicker(String ds, List moods) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text("Daily Mood"),
+        title: const Text("Mood"),
         content: SizedBox(
           width: double.maxFinite,
           child: ListView(
             shrinkWrap: true,
-            children: moods.map((m) {
-              return ListTile(
-                leading: Text(m['emoji'], style: const TextStyle(fontSize: 24)),
-                title: Text(m['name']),
-                onTap: () {
-                  FirebaseFirestore.instance
-                      .collection('daily_metrics')
-                      .doc(ds)
-                      .set({
-                        'mood': m['name'],
-                        'date': ds,
-                      }, SetOptions(merge: true));
-                  Navigator.pop(context);
-                },
-              );
-            }).toList(),
+            children: moods
+                .map(
+                  (m) => ListTile(
+                    leading: Text(
+                      m['emoji'],
+                      style: const TextStyle(fontSize: 26),
+                    ),
+                    title: Text(m['name']),
+                    onTap: () {
+                      FirebaseFirestore.instance
+                          .collection('daily_metrics')
+                          .doc(ds)
+                          .set({
+                            'mood': m['name'],
+                            'date': ds,
+                          }, SetOptions(merge: true));
+                      Navigator.pop(context);
+                    },
+                  ),
+                )
+                .toList(),
           ),
         ),
       ),
     );
   }
 
-  void _showSleepEntry(String ds, dynamic current) {
-    final ctrl = TextEditingController(text: current?.toString() ?? "");
+  void _showSleepPicker(String ds, dynamic cur) {
+    final ctrl = TextEditingController(text: cur?.toString() ?? "");
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -937,22 +827,16 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
     );
   }
 
-  void _showTextEntry(String title, String key, String ds, String initial) {
+  void _showTextPicker(String title, String key, String ds, String initial) {
     final ctrl = TextEditingController(text: initial);
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text("$title ($ds)"),
+        title: Text(title),
         content: TextField(
           controller: ctrl,
-          maxLines: 10,
-          textCapitalization: TextCapitalization.sentences,
-          autocorrect: false,
-          enableSuggestions: false,
-          decoration: const InputDecoration(
-            border: OutlineInputBorder(),
-            hintText: "Start typing...",
-          ),
+          maxLines: 6,
+          decoration: const InputDecoration(border: OutlineInputBorder()),
         ),
         actions: [
           ElevatedButton(
@@ -971,8 +855,98 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
   }
 }
 
+// --- INSIGHTS ---
+class InsightsScreen extends StatelessWidget {
+  final List<Habit> habits;
+  const InsightsScreen({super.key, required this.habits});
+  @override
+  Widget build(BuildContext context) {
+    final list = habits.where((h) => h.showInAnalytics).toList();
+    return Scaffold(
+      appBar: AppBar(title: const Text("Insights")),
+      body: ListView.builder(
+        padding: const EdgeInsets.all(16),
+        itemCount: list.length,
+        itemBuilder: (context, i) => Container(
+          margin: const EdgeInsets.only(bottom: 12),
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: Color(list[i].backgroundColorValue),
+            borderRadius: BorderRadius.circular(28),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    list[i].name,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 18,
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.palette_outlined),
+                    onPressed: () => _showColor(context, list[i]),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 15),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: [
+                  _stat("7 Days", list[i].getCount(7)),
+                  _stat("30 Days", list[i].getCount(30)),
+                  _stat("Streak", list[i].calculateStreak),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showColor(BuildContext context, Habit h) {
+    Color sel = Color(h.backgroundColorValue);
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Color"),
+        content: LucidColorPicker(
+          initialColor: sel,
+          onColorChanged: (c) => sel = c,
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () {
+              FirebaseFirestore.instance.collection('habits').doc(h.id).update({
+                'backgroundColorValue': sel.value,
+              });
+              Navigator.pop(context);
+            },
+            child: const Text("Save"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _stat(String l, int v) => Column(
+    children: [
+      Text(l, style: const TextStyle(fontSize: 10, color: Colors.black54)),
+      Text(
+        "$v",
+        style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+      ),
+    ],
+  );
+}
+
 // --- SETTINGS ---
-class ManageScreen extends StatelessWidget {
+class ManageScreen extends StatefulWidget {
   final List<Habit> habits;
   final List<HabitCategory> categories;
   const ManageScreen({
@@ -980,94 +954,137 @@ class ManageScreen extends StatelessWidget {
     required this.habits,
     required this.categories,
   });
+  @override
+  State<ManageScreen> createState() => _ManageScreenState();
+}
+
+class _ManageScreenState extends State<ManageScreen>
+    with SingleTickerProviderStateMixin {
+  late TabController _tab;
+  @override
+  void initState() {
+    super.initState();
+    _tab = TabController(length: 3, vsync: this);
+  }
 
   @override
   Widget build(BuildContext context) {
-    return DefaultTabController(
-      length: 3,
-      child: Scaffold(
-        appBar: AppBar(
-          title: const Text("Settings"),
-          bottom: const TabBar(
-            tabs: [
-              Tab(text: "Habits"),
-              Tab(text: "Tags"),
-              Tab(text: "Moods"),
-            ],
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text("Settings"),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.add_circle_outline, size: 28),
+            onPressed: () {
+              if (_tab.index == 0)
+                _editHabit(context);
+              else if (_tab.index == 1)
+                _editTag(context);
+              else
+                _editMood(context);
+            },
           ),
-        ),
-        body: TabBarView(
-          children: [
-            _HabitList(habits: habits, categories: categories),
-            _CategoryList(categories: categories),
-            _MoodList(),
+        ],
+        bottom: TabBar(
+          controller: _tab,
+          tabs: const [
+            Tab(text: "Habits"),
+            Tab(text: "Tags"),
+            Tab(text: "Moods"),
           ],
         ),
       ),
+      body: TabBarView(
+        controller: _tab,
+        children: [
+          ReorderableListView(
+            onReorder: (o, n) {
+              if (n > o) n--;
+              final l = List<Habit>.from(widget.habits);
+              final i = l.removeAt(o);
+              l.insert(n, i);
+              for (int j = 0; j < l.length; j++) {
+                FirebaseFirestore.instance
+                    .collection('habits')
+                    .doc(l[j].id)
+                    .update({'order': j});
+              }
+            },
+            children: widget.habits
+                .map(
+                  (h) => ListTile(
+                    key: ValueKey(h.id),
+                    title: Text(h.name),
+                    trailing: const Icon(Icons.drag_handle),
+                    onTap: () => _editHabit(context, h: h),
+                  ),
+                )
+                .toList(),
+          ),
+          ListView(
+            children: widget.categories
+                .map(
+                  (c) => ListTile(
+                    leading: CircleAvatar(backgroundColor: c.color),
+                    title: Text(c.name),
+                    onTap: () => _editTag(context, cat: c),
+                  ),
+                )
+                .toList(),
+          ),
+          _MoodList(),
+        ],
+      ),
     );
   }
-}
 
-class _HabitList extends StatelessWidget {
-  final List<Habit> habits;
-  final List<HabitCategory> categories;
-  const _HabitList({required this.habits, required this.categories});
-
-  void _showHabitDialog(BuildContext context, {Habit? habit}) {
-    final nameCtrl = TextEditingController(text: habit?.name ?? "");
-    String? selCat = (habit != null && habit.categoryId.isNotEmpty)
-        ? habit.categoryId
-        : (categories.isNotEmpty ? categories.first.id : null);
-    bool isVis = habit?.isVisible ?? true;
-    bool isFav = habit?.isFavorite ?? false;
-
+  void _editHabit(BuildContext context, {Habit? h}) {
+    final ctrl = TextEditingController(text: h?.name);
+    String? cat =
+        h?.categoryId ??
+        (widget.categories.isNotEmpty ? widget.categories.first.id : null);
+    bool fav = h?.isFavorite ?? false;
+    bool vis = h?.isVisible ?? true;
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDS) => AlertDialog(
-          title: Text(habit == null ? "New Habit" : "Edit Habit"),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: nameCtrl,
-                  textCapitalization: TextCapitalization.sentences,
-                  autocorrect: false,
-                  decoration: const InputDecoration(labelText: "Name"),
-                ),
-                const SizedBox(height: 10),
-                DropdownButtonFormField<String>(
-                  value: selCat,
-                  decoration: const InputDecoration(labelText: "Tag"),
-                  items: categories
-                      .map(
-                        (c) =>
-                            DropdownMenuItem(value: c.id, child: Text(c.name)),
-                      )
-                      .toList(),
-                  onChanged: (v) => setDS(() => selCat = v),
-                ),
-                SwitchListTile(
-                  title: const Text("Favorite"),
-                  value: isFav,
-                  onChanged: (v) => setDS(() => isFav = v),
-                ),
-                SwitchListTile(
-                  title: const Text("Visible"),
-                  value: isVis,
-                  onChanged: (v) => setDS(() => isVis = v),
-                ),
-              ],
-            ),
+          title: Text(h == null ? "New" : "Edit"),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: ctrl,
+                decoration: const InputDecoration(labelText: "Name"),
+              ),
+              DropdownButtonFormField<String>(
+                value: cat,
+                items: widget.categories
+                    .map(
+                      (c) => DropdownMenuItem(value: c.id, child: Text(c.name)),
+                    )
+                    .toList(),
+                onChanged: (v) => setDS(() => cat = v),
+              ),
+              SwitchListTile(
+                title: const Text("Favorite"),
+                value: fav,
+                onChanged: (v) => setDS(() => fav = v),
+              ),
+              SwitchListTile(
+                title: const Text("Visible"),
+                value: vis,
+                onChanged: (v) => setDS(() => vis = v),
+              ),
+            ],
           ),
           actions: [
-            if (habit != null && !habit.isSystem)
+            if (h != null && !h.isSystem)
               TextButton(
                 onPressed: () {
                   FirebaseFirestore.instance
                       .collection('habits')
-                      .doc(habit.id)
+                      .doc(h.id)
                       .delete();
                   Navigator.pop(context);
                 },
@@ -1078,26 +1095,26 @@ class _HabitList extends StatelessWidget {
               ),
             ElevatedButton(
               onPressed: () {
-                final data = {
-                  'name': nameCtrl.text,
-                  'categoryId': selCat,
-                  'isVisible': isVis,
-                  'isFavorite': isFav,
+                final d = {
+                  'name': ctrl.text,
+                  'categoryId': cat,
+                  'isFavorite': fav,
+                  'isVisible': vis,
                 };
-                if (habit == null)
+                if (h == null)
                   FirebaseFirestore.instance.collection('habits').add({
-                    ...data,
-                    'order': habits.length,
+                    ...d,
+                    'order': widget.habits.length,
                     'completionMap': {},
-                    'showInAnalytics': false,
-                    'backgroundColorValue': 0xFFFFFFFF,
                     'isSystem': false,
+                    'backgroundColorValue': 0xFFFFFFFF,
+                    'showInAnalytics': false,
                   });
                 else
                   FirebaseFirestore.instance
                       .collection('habits')
-                      .doc(habit.id)
-                      .update(data);
+                      .doc(h.id)
+                      .update(d);
                 Navigator.pop(context);
               },
               child: const Text("Save"),
@@ -1108,105 +1125,45 @@ class _HabitList extends StatelessWidget {
     );
   }
 
-  @override
-  Widget build(BuildContext context) => Scaffold(
-    floatingActionButton: FloatingActionButton(
-      onPressed: () => _showHabitDialog(context),
-      child: const Icon(Icons.add),
-    ),
-    body: ListView.builder(
-      itemCount: habits.length,
-      itemBuilder: (context, i) => ListTile(
-        title: Text(habits[i].name),
-        onTap: () => _showHabitDialog(context, habit: habits[i]),
-      ),
-    ),
-  );
-}
-
-class _CategoryList extends StatelessWidget {
-  final List<HabitCategory> categories;
-  const _CategoryList({required this.categories});
-
-  void _showCategoryDialog(BuildContext context, {HabitCategory? cat}) {
-    final nameCtrl = TextEditingController(text: cat?.name ?? "");
-    Color tempColor = cat?.color ?? Colors.blue;
-
+  void _editTag(BuildContext context, {HabitCategory? cat}) {
+    final ctrl = TextEditingController(text: cat?.name);
+    Color col = cat?.color ?? Colors.blue;
     showDialog(
       context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDS) => AlertDialog(
-          title: Text(cat == null ? "New Tag" : "Edit Tag"),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: nameCtrl,
-                  textCapitalization: TextCapitalization.sentences,
-                  autocorrect: false,
-                  decoration: const InputDecoration(labelText: "Tag Name"),
-                ),
-                const SizedBox(height: 24),
-                LucidColorPicker(
-                  initialColor: tempColor,
-                  onColorChanged: (c) => tempColor = c,
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            if (cat != null)
-              TextButton(
-                onPressed: () {
-                  FirebaseFirestore.instance
-                      .collection('categories')
-                      .doc(cat.id)
-                      .delete();
-                  Navigator.pop(context);
-                },
-                child: const Text(
-                  "Delete",
-                  style: TextStyle(color: Colors.red),
-                ),
+      builder: (context) => AlertDialog(
+        title: const Text("Tag"),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(controller: ctrl),
+              const SizedBox(height: 15),
+              LucidColorPicker(
+                initialColor: col,
+                onColorChanged: (c) => col = c,
               ),
-            ElevatedButton(
-              onPressed: () {
-                FirebaseFirestore.instance
-                    .collection('categories')
-                    .doc(
-                      cat?.id ??
-                          DateTime.now().millisecondsSinceEpoch.toString(),
-                    )
-                    .set({
-                      'name': nameCtrl.text,
-                      'colorValue': tempColor.value,
-                    }, SetOptions(merge: true));
-                Navigator.pop(context);
-              },
-              child: const Text("Save"),
-            ),
-          ],
+            ],
+          ),
         ),
+        actions: [
+          ElevatedButton(
+            onPressed: () {
+              FirebaseFirestore.instance
+                  .collection('categories')
+                  .doc(
+                    cat?.id ?? DateTime.now().millisecondsSinceEpoch.toString(),
+                  )
+                  .set({'name': ctrl.text, 'colorValue': col.value});
+              Navigator.pop(context);
+            },
+            child: const Text("Save"),
+          ),
+        ],
       ),
     );
   }
 
-  @override
-  Widget build(BuildContext context) => Scaffold(
-    floatingActionButton: FloatingActionButton(
-      onPressed: () => _showCategoryDialog(context),
-      child: const Icon(Icons.add),
-    ),
-    body: ListView.builder(
-      itemCount: categories.length,
-      itemBuilder: (context, i) => ListTile(
-        leading: CircleAvatar(backgroundColor: categories[i].color),
-        title: Text(categories[i].name),
-        onTap: () => _showCategoryDialog(context, cat: categories[i]),
-      ),
-    ),
-  );
+  void _editMood(BuildContext context) {}
 }
 
 class _MoodList extends StatelessWidget {
@@ -1218,50 +1175,47 @@ class _MoodList extends StatelessWidget {
           .orderBy('order')
           .snapshots(),
       builder: (context, snap) {
-        if (!snap.hasData)
-          return const Center(child: CircularProgressIndicator());
+        if (!snap.hasData) return const SizedBox();
         final moods = snap.data!.docs;
-        return Scaffold(
-          floatingActionButton: FloatingActionButton(
-            onPressed: () => _showMoodDialog(context),
-            child: const Icon(Icons.add),
-          ),
-          body: ReorderableListView.builder(
-            itemCount: moods.length,
-            onReorder: (oldIdx, newIdx) {
-              if (newIdx > oldIdx) newIdx -= 1;
-              final list = List<DocumentSnapshot>.from(moods);
-              final item = list.removeAt(oldIdx);
-              list.insert(newIdx, item);
-              for (int i = 0; i < list.length; i++) {
-                FirebaseFirestore.instance
-                    .collection('moods')
-                    .doc(list[i].id)
-                    .update({'order': i});
-              }
-            },
-            itemBuilder: (context, i) => ListTile(
-              key: ValueKey(moods[i].id),
-              leading: Text(
-                moods[i]['emoji'],
-                style: const TextStyle(fontSize: 24),
-              ),
-              title: Text(moods[i]['name']),
-              onTap: () => _showMoodDialog(context, doc: moods[i]),
-            ),
-          ),
+        return ReorderableListView(
+          onReorder: (o, n) {
+            if (n > o) n--;
+            final l = List.from(moods);
+            final i = l.removeAt(o);
+            l.insert(n, i);
+            for (int j = 0; j < l.length; j++) {
+              FirebaseFirestore.instance
+                  .collection('moods')
+                  .doc(l[j].id)
+                  .update({'order': j});
+            }
+          },
+          children: moods
+              .map(
+                (m) => ListTile(
+                  key: ValueKey(m.id),
+                  leading: Text(
+                    m['emoji'],
+                    style: const TextStyle(fontSize: 32),
+                  ),
+                  title: Text(m['name']),
+                  trailing: const Icon(Icons.drag_handle),
+                  onTap: () => _editMood(context, m),
+                ),
+              )
+              .toList(),
         );
       },
     );
   }
 
-  void _showMoodDialog(BuildContext context, {DocumentSnapshot? doc}) {
+  void _editMood(BuildContext context, DocumentSnapshot? doc) {
     final eCtrl = TextEditingController(text: doc != null ? doc['emoji'] : "");
     final nCtrl = TextEditingController(text: doc != null ? doc['name'] : "");
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text("Mood Settings"),
+        title: const Text("Mood"),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -1278,18 +1232,18 @@ class _MoodList extends StatelessWidget {
         actions: [
           ElevatedButton(
             onPressed: () {
-              final data = {
+              final d = {
                 'emoji': eCtrl.text,
                 'name': nCtrl.text,
                 'order': doc != null ? doc['order'] : 99,
               };
               if (doc == null)
-                FirebaseFirestore.instance.collection('moods').add(data);
+                FirebaseFirestore.instance.collection('moods').add(d);
               else
                 FirebaseFirestore.instance
                     .collection('moods')
                     .doc(doc.id)
-                    .update(data);
+                    .update(d);
               Navigator.pop(context);
             },
             child: const Text("Save"),
