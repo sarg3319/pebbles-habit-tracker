@@ -189,7 +189,6 @@ class Habit {
   int get calculateStreak {
     int streak = 0;
     DateTime date = DateTime.now();
-    // Check if streak started today or yesterday (standard streak logic)
     if (completionMap[DateFormat('yyyy-MM-dd').format(date)] != true) {
       date = date.subtract(const Duration(days: 1));
     }
@@ -277,6 +276,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                     categories: categories,
                     initialFilters: _selectedFilters,
                   ),
+                  const JournalScreen(), // NEW SCREEN
                   InsightsScreen(habits: habits),
                   ManageScreen(habits: habits, categories: categories),
                 ],
@@ -297,6 +297,10 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                     icon: Icon(Icons.grid_view_rounded),
                     label: 'Board',
                   ),
+                  BottomNavigationBarItem(
+                    icon: Icon(Icons.book_rounded),
+                    label: 'Journal',
+                  ), // NEW TAB
                   BottomNavigationBarItem(
                     icon: Icon(Icons.analytics_rounded),
                     label: 'Insights',
@@ -704,19 +708,19 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
     final ds = DateFormat(
       'yyyy-MM-dd',
     ).format(DateTime.now().subtract(Duration(days: dIdx)));
-    Map? data;
+    Map? dayData;
     for (var m in metrics) {
       if (m.id == ds) {
-        data = m.data() as Map?;
+        dayData = m.data() as Map?;
         break;
       }
     }
     Widget child = const SizedBox();
     if (h.name == "Mood") {
       String emoji = "❔";
-      if (data?['mood'] != null) {
+      if (dayData?['mood'] != null) {
         for (var m in moods) {
-          if (m['name'] == data?['mood']) {
+          if (m['name'] == dayData?['mood']) {
             emoji = m['emoji'];
             break;
           }
@@ -725,11 +729,11 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
       child = Text(emoji, style: const TextStyle(fontSize: 22));
     } else if (h.name == "Sleep") {
       child = Text(
-        "${data?['sleep'] ?? '-'}",
+        "${dayData?['sleep'] ?? '-'}",
         style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
       );
     } else if (h.name == "Diary" || h.name == "Dreams") {
-      bool hasText = data?[h.name.toLowerCase()]?.isNotEmpty ?? false;
+      bool hasText = dayData?[h.name.toLowerCase()]?.isNotEmpty ?? false;
       child = Icon(
         h.name == "Diary" ? Icons.book : Icons.cloud,
         size: 18,
@@ -757,14 +761,9 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
         if (h.name == "Mood")
           _showMoodPicker(ds, moods);
         else if (h.name == "Sleep")
-          _showSleepPicker(ds, data?['sleep']);
+          _showSleepPicker(ds, dayData?['sleep']);
         else if (h.name == "Diary" || h.name == "Dreams")
-          _showTextPicker(
-            h.name,
-            h.name.toLowerCase(),
-            ds,
-            data?[h.name.toLowerCase()] ?? "",
-          );
+          _showTextPicker(context, h.name, h.name.toLowerCase(), ds);
         else {
           Map<String, bool> next = Map.from(h.completionMap);
           next[ds] = !(h.completionMap[ds] ?? false);
@@ -904,42 +903,6 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
     );
   }
 
-  void _showTextPicker(String title, String key, String ds, String initial) {
-    final ctrl = TextEditingController(text: initial);
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(title),
-        content: SizedBox(
-          width: 300,
-          height: 180,
-          child: TextField(
-            controller: ctrl,
-            maxLines: 6,
-            minLines: 6,
-            textCapitalization: TextCapitalization.sentences,
-            decoration: const InputDecoration(
-              border: OutlineInputBorder(),
-              hintText: "Write here...",
-            ),
-          ),
-        ),
-        actions: [
-          ElevatedButton(
-            onPressed: () {
-              FirebaseFirestore.instance
-                  .collection('daily_metrics')
-                  .doc(ds)
-                  .set({key: ctrl.text, 'date': ds}, SetOptions(merge: true));
-              Navigator.pop(context);
-            },
-            child: const Text("Save"),
-          ),
-        ],
-      ),
-    );
-  }
-
   void _editHabit(BuildContext context, {Habit? h}) {
     final ctrl = TextEditingController(text: h?.name);
     final descCtrl = TextEditingController(text: h?.description);
@@ -1047,6 +1010,151 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// Global Text Picker for reuse
+void _showTextPicker(
+  BuildContext context,
+  String title,
+  String key,
+  String ds,
+) async {
+  DocumentSnapshot doc = await FirebaseFirestore.instance
+      .collection('daily_metrics')
+      .doc(ds)
+      .get();
+  String currentText = "";
+  if (doc.exists) {
+    Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+    currentText = data[key] ?? "";
+  }
+  final ctrl = TextEditingController(text: currentText);
+  showDialog(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text("$title ($ds)"),
+      content: SizedBox(
+        width: 400,
+        height: 250,
+        child: TextField(
+          controller: ctrl,
+          maxLines: 10,
+          minLines: 8,
+          textCapitalization: TextCapitalization.sentences,
+          decoration: const InputDecoration(
+            border: OutlineInputBorder(),
+            hintText: "Write here...",
+          ),
+        ),
+      ),
+      actions: [
+        ElevatedButton(
+          onPressed: () {
+            FirebaseFirestore.instance.collection('daily_metrics').doc(ds).set({
+              key: ctrl.text,
+              'date': ds,
+            }, SetOptions(merge: true));
+            Navigator.pop(context);
+          },
+          child: const Text("Save"),
+        ),
+      ],
+    ),
+  );
+}
+
+// --- NEW JOURNAL SCREEN ---
+class JournalScreen extends StatelessWidget {
+  const JournalScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text("Journal")),
+      body: StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance.collection('moods').snapshots(),
+        builder: (context, moodSnap) {
+          final moodsList = moodSnap.hasData ? moodSnap.data!.docs : [];
+          return StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance
+                .collection('daily_metrics')
+                .orderBy('date', descending: true)
+                .snapshots(),
+            builder: (context, snap) {
+              if (!snap.hasData)
+                return const Center(child: CircularProgressIndicator());
+              final entries = snap.data!.docs.where((doc) {
+                final d = doc.data() as Map<String, dynamic>;
+                return (d['diary']?.toString().isNotEmpty ?? false) ||
+                    (d['mood'] != null);
+              }).toList();
+
+              if (entries.isEmpty)
+                return const Center(
+                  child: Text("No diary entries yet. Tap 'Board' to write."),
+                );
+
+              return ListView.builder(
+                padding: const EdgeInsets.all(16),
+                itemCount: entries.length,
+                itemBuilder: (context, i) {
+                  final data = entries[i].data() as Map<String, dynamic>;
+                  final dateStr = data['date'] ?? "Unknown Date";
+                  final diaryText = data['diary'] ?? "";
+                  final moodName = data['mood'];
+                  String emoji = "❔";
+                  if (moodName != null) {
+                    for (var m in moodsList) {
+                      if (m['name'] == moodName) {
+                        emoji = m['emoji'];
+                        break;
+                      }
+                    }
+                  }
+
+                  return Card(
+                    margin: const EdgeInsets.only(bottom: 16),
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(20),
+                      side: BorderSide(color: Colors.grey.withOpacity(0.1)),
+                    ),
+                    child: ListTile(
+                      contentPadding: const EdgeInsets.all(16),
+                      title: Row(
+                        children: [
+                          Text(emoji, style: const TextStyle(fontSize: 24)),
+                          const SizedBox(width: 12),
+                          Text(
+                            dateStr,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
+                        ],
+                      ),
+                      subtitle: Padding(
+                        padding: const EdgeInsets.only(top: 8.0),
+                        child: Text(
+                          diaryText.isEmpty ? "No note recorded." : diaryText,
+                          maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(color: Colors.black87),
+                        ),
+                      ),
+                      onTap: () =>
+                          _showTextPicker(context, "Diary", "diary", dateStr),
+                    ),
+                  );
+                },
+              );
+            },
+          );
+        },
       ),
     );
   }
@@ -1234,7 +1342,7 @@ class _ManageScreenState extends State<ManageScreen>
               else if (_tab.index == 1)
                 _editTag(context);
               else
-                _editMood(context);
+                _editMood(context, null);
             },
           ),
         ],
@@ -1464,7 +1572,60 @@ class _ManageScreenState extends State<ManageScreen>
     );
   }
 
-  void _editMood(BuildContext context) {}
+  void _editMood(BuildContext context, DocumentSnapshot? doc) {
+    final eCtrl = TextEditingController(text: doc != null ? doc['emoji'] : "");
+    final nCtrl = TextEditingController(text: doc != null ? doc['name'] : "");
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Mood"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: eCtrl,
+              decoration: const InputDecoration(labelText: "Emoji"),
+            ),
+            TextField(
+              controller: nCtrl,
+              decoration: const InputDecoration(labelText: "Name"),
+            ),
+          ],
+        ),
+        actions: [
+          if (doc != null)
+            TextButton(
+              onPressed: () {
+                FirebaseFirestore.instance
+                    .collection('moods')
+                    .doc(doc.id)
+                    .delete();
+                Navigator.pop(context);
+              },
+              child: const Text("Delete", style: TextStyle(color: Colors.red)),
+            ),
+          ElevatedButton(
+            onPressed: () {
+              final d = {
+                'emoji': eCtrl.text,
+                'name': nCtrl.text,
+                'order': doc != null ? doc['order'] : 99,
+              };
+              if (doc == null)
+                FirebaseFirestore.instance.collection('moods').add(d);
+              else
+                FirebaseFirestore.instance
+                    .collection('moods')
+                    .doc(doc.id)
+                    .update(d);
+              Navigator.pop(context);
+            },
+            child: const Text("Save"),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _MoodList extends StatelessWidget {
@@ -1501,56 +1662,66 @@ class _MoodList extends StatelessWidget {
                   ),
                   title: Text(m['name']),
                   trailing: const Icon(Icons.drag_handle),
-                  onTap: () => _editMood(context, m),
+                  onTap: () {
+                    final eCtrl = TextEditingController(text: m['emoji']);
+                    final nCtrl = TextEditingController(text: m['name']);
+                    showDialog(
+                      context: context,
+                      builder: (context) => AlertDialog(
+                        title: const Text("Mood"),
+                        content: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            TextField(
+                              controller: eCtrl,
+                              decoration: const InputDecoration(
+                                labelText: "Emoji",
+                              ),
+                            ),
+                            TextField(
+                              controller: nCtrl,
+                              decoration: const InputDecoration(
+                                labelText: "Name",
+                              ),
+                            ),
+                          ],
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () {
+                              FirebaseFirestore.instance
+                                  .collection('moods')
+                                  .doc(m.id)
+                                  .delete();
+                              Navigator.pop(context);
+                            },
+                            child: const Text(
+                              "Delete",
+                              style: TextStyle(color: Colors.red),
+                            ),
+                          ),
+                          ElevatedButton(
+                            onPressed: () {
+                              FirebaseFirestore.instance
+                                  .collection('moods')
+                                  .doc(m.id)
+                                  .update({
+                                    'emoji': eCtrl.text,
+                                    'name': nCtrl.text,
+                                  });
+                              Navigator.pop(context);
+                            },
+                            child: const Text("Save"),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
                 ),
               )
               .toList(),
         );
       },
-    );
-  }
-
-  void _editMood(BuildContext context, DocumentSnapshot? doc) {
-    final eCtrl = TextEditingController(text: doc != null ? doc['emoji'] : "");
-    final nCtrl = TextEditingController(text: doc != null ? doc['name'] : "");
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Mood"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: eCtrl,
-              decoration: const InputDecoration(labelText: "Emoji"),
-            ),
-            TextField(
-              controller: nCtrl,
-              decoration: const InputDecoration(labelText: "Name"),
-            ),
-          ],
-        ),
-        actions: [
-          ElevatedButton(
-            onPressed: () {
-              final d = {
-                'emoji': eCtrl.text,
-                'name': nCtrl.text,
-                'order': doc != null ? doc['order'] : 99,
-              };
-              if (doc == null)
-                FirebaseFirestore.instance.collection('moods').add(d);
-              else
-                FirebaseFirestore.instance
-                    .collection('moods')
-                    .doc(doc.id)
-                    .update(d);
-              Navigator.pop(context);
-            },
-            child: const Text("Save"),
-          ),
-        ],
-      ),
     );
   }
 }
