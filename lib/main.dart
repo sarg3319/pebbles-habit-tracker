@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'package:flutter/physics.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -20,25 +21,258 @@ class PebblesApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        colorSchemeSeed: Colors.blue,
-        scaffoldBackgroundColor: const Color(0xFFFBFBFE),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-          centerTitle: false,
-          titleTextStyle: TextStyle(
-            color: Colors.black,
-            fontSize: 22,
-            fontWeight: FontWeight.bold,
-          ),
-          iconTheme: IconThemeData(color: Colors.black),
-        ),
-      ),
+      theme: _pebblesTheme(),
       home: const MainNavigationScreen(),
     );
   }
+}
+
+// --- DESIGN TOKENS ---
+// iOS system colors: grouped background with white cards, one accent tint,
+// and a visible-but-quiet fill for "not yet logged" marks.
+const Color _kAccent = Color(0xFF007AFF);
+const Color _kGroupedBackground = Color(0xFFF2F2F7);
+const Color _kEmptyMark = Color(0xFFE5E5EA);
+const Color _kSecondaryLabel = Color(0xFF8E8E93);
+const Color _kHairline = Color(0x1F000000);
+const Color _kDestructive = Color(0xFFFF3B30);
+
+ThemeData _pebblesTheme() {
+  final scheme = ColorScheme.fromSeed(seedColor: _kAccent).copyWith(
+    primary: _kAccent,
+    surface: Colors.white,
+    surfaceTint: Colors.transparent,
+    error: _kDestructive,
+  );
+  final base = ThemeData(useMaterial3: true, colorScheme: scheme);
+  final rounded12 = RoundedRectangleBorder(
+    borderRadius: BorderRadius.circular(12),
+  );
+  final fieldBorder = OutlineInputBorder(
+    borderRadius: BorderRadius.circular(10),
+    borderSide: BorderSide.none,
+  );
+  return base.copyWith(
+    scaffoldBackgroundColor: _kGroupedBackground,
+    // Press feedback is an instant highlight on touch-down, not a ripple
+    // that blooms after the finger has already moved on.
+    splashFactory: NoSplash.splashFactory,
+    highlightColor: Colors.black.withValues(alpha: 0.06),
+    // Cupertino routes slide in from the right, leave the same way, and can
+    // be grabbed mid-flight with an edge swipe.
+    pageTransitionsTheme: PageTransitionsTheme(
+      builders: {
+        for (final p in TargetPlatform.values)
+          p: const CupertinoPageTransitionsBuilder(),
+      },
+    ),
+    appBarTheme: const AppBarTheme(
+      backgroundColor: _kGroupedBackground,
+      surfaceTintColor: Colors.transparent,
+      elevation: 0,
+      scrolledUnderElevation: 0,
+      centerTitle: false,
+      titleTextStyle: TextStyle(
+        color: Colors.black,
+        fontSize: 28,
+        fontWeight: FontWeight.w700,
+        letterSpacing: -0.6, // large titles want negative tracking
+        height: 1.1,
+      ),
+      iconTheme: IconThemeData(color: _kAccent),
+      actionsIconTheme: IconThemeData(color: _kAccent),
+    ),
+    bottomNavigationBarTheme: const BottomNavigationBarThemeData(
+      backgroundColor: Colors.white,
+      elevation: 0,
+      selectedItemColor: _kAccent,
+      unselectedItemColor: _kSecondaryLabel,
+      selectedLabelStyle: TextStyle(fontSize: 10, fontWeight: FontWeight.w600),
+      unselectedLabelStyle: TextStyle(fontSize: 10),
+      showUnselectedLabels: true,
+    ),
+    cardTheme: CardThemeData(
+      color: Colors.white,
+      surfaceTintColor: Colors.transparent,
+      elevation: 0,
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+    ),
+    dialogTheme: DialogThemeData(
+      backgroundColor: Colors.white,
+      surfaceTintColor: Colors.transparent,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+      titleTextStyle: const TextStyle(
+        color: Colors.black,
+        fontSize: 19,
+        fontWeight: FontWeight.w700,
+        letterSpacing: -0.3,
+      ),
+    ),
+    bottomSheetTheme: const BottomSheetThemeData(
+      backgroundColor: Colors.white,
+      surfaceTintColor: Colors.transparent,
+      showDragHandle: true,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+    ),
+    popupMenuTheme: PopupMenuThemeData(
+      color: Colors.white,
+      surfaceTintColor: Colors.transparent,
+      elevation: 10,
+      shadowColor: Colors.black26,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+    ),
+    inputDecorationTheme: InputDecorationTheme(
+      filled: true,
+      fillColor: _kGroupedBackground,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      border: fieldBorder,
+      enabledBorder: fieldBorder,
+      focusedBorder: fieldBorder.copyWith(
+        borderSide: const BorderSide(color: _kAccent, width: 1.5),
+      ),
+      floatingLabelStyle: const TextStyle(color: _kAccent),
+    ),
+    elevatedButtonTheme: ElevatedButtonThemeData(
+      style: ElevatedButton.styleFrom(
+        backgroundColor: _kAccent,
+        foregroundColor: Colors.white,
+        elevation: 0,
+        shape: rounded12,
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+        textStyle: const TextStyle(fontWeight: FontWeight.w600),
+      ),
+    ),
+    textButtonTheme: TextButtonThemeData(
+      style: TextButton.styleFrom(foregroundColor: _kAccent, shape: rounded12),
+    ),
+    switchTheme: SwitchThemeData(
+      thumbColor: const WidgetStatePropertyAll(Colors.white),
+      trackColor: WidgetStateProperty.resolveWith(
+        (s) => s.contains(WidgetState.selected)
+            ? const Color(0xFF34C759)
+            : _kEmptyMark,
+      ),
+      trackOutlineColor: const WidgetStatePropertyAll(Colors.transparent),
+    ),
+    checkboxTheme: CheckboxThemeData(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(5)),
+      side: const BorderSide(color: _kSecondaryLabel, width: 1.5),
+    ),
+    chipTheme: ChipThemeData(
+      backgroundColor: Colors.white,
+      selectedColor: _kAccent.withValues(alpha: 0.14),
+      side: BorderSide.none,
+      shape: const StadiumBorder(),
+      showCheckmark: false,
+      labelStyle: const TextStyle(fontWeight: FontWeight.w600),
+    ),
+    tabBarTheme: const TabBarThemeData(
+      labelColor: _kAccent,
+      unselectedLabelColor: _kSecondaryLabel,
+      indicatorColor: _kAccent,
+      dividerColor: _kHairline,
+      labelStyle: TextStyle(fontWeight: FontWeight.w600),
+    ),
+    dividerTheme: const DividerThemeData(color: _kHairline, thickness: 0.5),
+    progressIndicatorTheme: const ProgressIndicatorThemeData(color: _kAccent),
+  );
+}
+
+bool _reduceMotion(BuildContext context) =>
+    MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+
+// Shrinks on touch-down and springs back on release. Uses a Listener so it
+// never competes with the child's tap/long-press recognizers, and starts every
+// spring from the current on-screen value so rapid taps stay continuous.
+class _PressScale extends StatefulWidget {
+  final Widget child;
+  const _PressScale({required this.child});
+  @override
+  State<_PressScale> createState() => _PressScaleState();
+}
+
+class _PressScaleState extends State<_PressScale>
+    with SingleTickerProviderStateMixin {
+  // Critically damped (no overshoot), ~0.3s response.
+  static final _spring = SpringDescription.withDampingRatio(
+    mass: 1,
+    stiffness: 440,
+    ratio: 1.0,
+  );
+  late final AnimationController _c = AnimationController.unbounded(
+    vsync: this,
+    value: 1,
+  );
+  Offset? _down;
+
+  void _to(double target) {
+    if (_reduceMotion(context)) {
+      _c.value = 1;
+      return;
+    }
+    _c.animateWith(SpringSimulation(_spring, _c.value, target, _c.velocity));
+  }
+
+  void _release() {
+    _down = null;
+    _to(1);
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Listener(
+      onPointerDown: (e) {
+        _down = e.position;
+        _to(0.92);
+      },
+      // ~10px of hysteresis: once the finger travels, it's a scroll, not a press.
+      onPointerMove: (e) {
+        if (_down != null && (e.position - _down!).distance > 10) _release();
+      },
+      onPointerUp: (_) => _release(),
+      onPointerCancel: (_) => _release(),
+      child: AnimatedBuilder(
+        animation: _c,
+        builder: (context, child) =>
+            Transform.scale(scale: _c.value, child: child),
+        child: widget.child,
+      ),
+    );
+  }
+}
+
+Future<bool> _confirmDelete(BuildContext context, String what) async {
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text('Delete $what?'),
+      content: const Text('This can\'t be undone.'),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('Cancel'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(context, true),
+          style: TextButton.styleFrom(foregroundColor: _kDestructive),
+          child: const Text(
+            'Delete',
+            style: TextStyle(fontWeight: FontWeight.w600),
+          ),
+        ),
+      ],
+    ),
+  );
+  return ok ?? false;
 }
 
 Widget _lockedWritingField({
@@ -59,11 +293,7 @@ Widget _lockedWritingField({
       textAlignVertical: TextAlignVertical.top,
       textCapitalization: TextCapitalization.sentences,
       scrollPhysics: const ClampingScrollPhysics(),
-      decoration: InputDecoration(
-        border: const OutlineInputBorder(),
-        hintText: hintText,
-        alignLabelWithHint: true,
-      ),
+      decoration: InputDecoration(hintText: hintText, alignLabelWithHint: true),
     ),
   );
 }
@@ -380,40 +610,47 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                   ),
                   HomeFlowShell(habits: habits, categories: categories),
                   const JournalScreen(), // NEW SCREEN
-                  InsightsScreen(habits: habits),
+                  InsightsScreen(habits: habits, categories: categories),
                   ManageScreen(habits: habits, categories: categories),
                 ],
               ),
-              bottomNavigationBar: BottomNavigationBar(
-                currentIndex: _selectedIndex,
-                type: BottomNavigationBarType.fixed,
-                onTap: (i) => setState(() {
-                  _selectedIndex = i;
-                  if (i != 0) _selectedFilters = ['all'];
-                  if (i != 0) _boardTitle = 'Board';
-                }),
-                items: const [
-                  BottomNavigationBarItem(
-                    icon: Icon(Icons.grid_view_rounded),
-                    label: 'Board',
+              bottomNavigationBar: DecoratedBox(
+                decoration: const BoxDecoration(
+                  border: Border(
+                    top: BorderSide(color: _kHairline, width: 0.5),
                   ),
-                  BottomNavigationBarItem(
-                    icon: Icon(Icons.list_alt_rounded),
-                    label: 'List',
-                  ),
-                  BottomNavigationBarItem(
-                    icon: Icon(Icons.book_rounded),
-                    label: 'Journal',
-                  ), // NEW TAB
-                  BottomNavigationBarItem(
-                    icon: Icon(Icons.analytics_rounded),
-                    label: 'Insights',
-                  ),
-                  BottomNavigationBarItem(
-                    icon: Icon(Icons.tune_rounded),
-                    label: 'Settings',
-                  ),
-                ],
+                ),
+                child: BottomNavigationBar(
+                  currentIndex: _selectedIndex,
+                  type: BottomNavigationBarType.fixed,
+                  onTap: (i) => setState(() {
+                    _selectedIndex = i;
+                    if (i != 0) _selectedFilters = ['all'];
+                    if (i != 0) _boardTitle = 'Board';
+                  }),
+                  items: const [
+                    BottomNavigationBarItem(
+                      icon: Icon(Icons.grid_view_rounded),
+                      label: 'Board',
+                    ),
+                    BottomNavigationBarItem(
+                      icon: Icon(Icons.list_alt_rounded),
+                      label: 'List',
+                    ),
+                    BottomNavigationBarItem(
+                      icon: Icon(Icons.book_rounded),
+                      label: 'Journal',
+                    ), // NEW TAB
+                    BottomNavigationBarItem(
+                      icon: Icon(Icons.analytics_rounded),
+                      label: 'Insights',
+                    ),
+                    BottomNavigationBarItem(
+                      icon: Icon(Icons.tune_rounded),
+                      label: 'Settings',
+                    ),
+                  ],
+                ),
               ),
             );
           },
@@ -446,6 +683,7 @@ class _HomeFlowShellState extends State<HomeFlowShell> {
   void _openBoard(String filterId, String title, {String? singleHabitId}) {
     setState(() {
       _showBoard = true;
+      _boardSettledAway = false;
       _filterId = filterId;
       _title = title;
       _singleHabitId = singleHabitId;
@@ -461,25 +699,64 @@ class _HomeFlowShellState extends State<HomeFlowShell> {
     });
   }
 
+  // Keeps the board out of paint/hit-testing once it has fully slid away.
+  bool _boardSettledAway = true;
+
   @override
   Widget build(BuildContext context) {
-    return IndexedStack(
-      index: _showBoard ? 1 : 0,
+    // Same path in and out (from/to the right edge), and the list recedes a
+    // little underneath, like a navigation push. Implicit animations restart
+    // from the current position, so a quick back-and-forth never jumps.
+    final duration = _reduceMotion(context)
+        ? Duration.zero
+        : const Duration(milliseconds: 380);
+    const curve = Curves.easeOutCubic;
+    return Stack(
       children: [
-        CategoryHomeScreen(
-          onOpenBoard: _openBoard,
-          habits: widget.habits,
-          categories: widget.categories,
+        AnimatedSlide(
+          offset: _showBoard ? const Offset(-0.25, 0) : Offset.zero,
+          duration: duration,
+          curve: curve,
+          child: IgnorePointer(
+            ignoring: _showBoard,
+            child: ExcludeSemantics(
+              excluding: _showBoard,
+              child: CategoryHomeScreen(
+                onOpenBoard: _openBoard,
+                habits: widget.habits,
+                categories: widget.categories,
+              ),
+            ),
+          ),
         ),
-        HabitCalendarScreen(
-          habits: widget.habits,
-          categories: widget.categories,
-          initialFilters: [_filterId],
-          title: _title,
-          onBackToHome: _goBackHome,
-          showHiddenHabits: true,
-          forceAlphabetical: true,
-          singleHabitId: _singleHabitId,
+        Offstage(
+          offstage: _boardSettledAway,
+          child: AnimatedSlide(
+            offset: _showBoard ? Offset.zero : const Offset(1, 0),
+            duration: duration,
+            curve: curve,
+            onEnd: () {
+              if (!_showBoard) setState(() => _boardSettledAway = true);
+            },
+            child: IgnorePointer(
+              ignoring: !_showBoard,
+              child: DecoratedBox(
+                decoration: const BoxDecoration(
+                  boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 24)],
+                ),
+                child: HabitCalendarScreen(
+                  habits: widget.habits,
+                  categories: widget.categories,
+                  initialFilters: [_filterId],
+                  title: _title,
+                  onBackToHome: _goBackHome,
+                  showHiddenHabits: true,
+                  forceAlphabetical: true,
+                  singleHabitId: _singleHabitId,
+                ),
+              ),
+            ),
+          ),
         ),
       ],
     );
@@ -562,8 +839,9 @@ class _CategoryHomeScreenState extends State<CategoryHomeScreen> {
                         child: Text(
                           title,
                           style: const TextStyle(
-                            fontSize: 14,
+                            fontSize: 15,
                             fontWeight: FontWeight.w700,
+                            letterSpacing: -0.2,
                           ),
                         ),
                       ),
@@ -574,11 +852,15 @@ class _CategoryHomeScreenState extends State<CategoryHomeScreen> {
             ),
             IconButton(
               onPressed: () => _toggleSection(id),
-              icon: Icon(
-                expanded
-                    ? Icons.keyboard_arrow_up_rounded
-                    : Icons.keyboard_arrow_down_rounded,
+              icon: AnimatedRotation(
+                turns: expanded ? 0.5 : 0,
+                duration: _reduceMotion(context)
+                    ? Duration.zero
+                    : const Duration(milliseconds: 260),
+                curve: Curves.easeOutCubic,
+                child: const Icon(Icons.keyboard_arrow_down_rounded),
               ),
+              color: _kSecondaryLabel,
               tooltip: expanded ? 'Collapse' : 'Expand',
             ),
           ],
@@ -620,11 +902,13 @@ class _CategoryHomeScreenState extends State<CategoryHomeScreen> {
                       tooltip: 'Show on board',
                       onPressed: () => _toggleVisible(habit),
                     ),
+              iconColor: habit.isVisible ? _kAccent : _kSecondaryLabel,
               title: Text(
                 habit.name,
-                style: const TextStyle(
-                  fontSize: 13,
+                style: TextStyle(
+                  fontSize: 14,
                   fontWeight: FontWeight.w600,
+                  color: habit.isVisible ? Colors.black : _kSecondaryLabel,
                 ),
               ),
             ),
@@ -668,8 +952,10 @@ class _CategoryHomeScreenState extends State<CategoryHomeScreen> {
             crossFadeState: expanded
                 ? CrossFadeState.showSecond
                 : CrossFadeState.showFirst,
-            duration: const Duration(milliseconds: 180),
-            sizeCurve: Curves.easeOut,
+            duration: _reduceMotion(context)
+                ? Duration.zero
+                : const Duration(milliseconds: 240),
+            sizeCurve: Curves.easeOutCubic,
           ),
         ],
       ),
@@ -908,7 +1194,11 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
           alignment: Alignment.centerLeft,
           child: const Text(
             "Item",
-            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+            style: TextStyle(
+              fontWeight: FontWeight.w600,
+              fontSize: 12,
+              color: _kSecondaryLabel,
+            ),
           ),
         ),
         Expanded(
@@ -923,15 +1213,28 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
                   width: 55,
                   height: 40,
                   alignment: Alignment.center,
-                  child: Text(
-                    DateFormat(
-                      'dd\nE',
-                    ).format(DateTime.now().subtract(Duration(days: i))),
-                    style: const TextStyle(
-                      fontSize: 9,
-                      fontWeight: FontWeight.bold,
+                  child: Container(
+                    width: 38,
+                    padding: const EdgeInsets.symmetric(vertical: 3),
+                    decoration: i == 0
+                        ? BoxDecoration(
+                            color: _kAccent,
+                            borderRadius: BorderRadius.circular(9),
+                          )
+                        : null,
+                    child: Text(
+                      DateFormat(
+                        'dd\nE',
+                      ).format(DateTime.now().subtract(Duration(days: i))),
+                      style: TextStyle(
+                        fontSize: 9,
+                        fontWeight: FontWeight.bold,
+                        height: 1.25,
+                        color: i == 0 ? Colors.white : _kSecondaryLabel,
+                        fontFeatures: const [ui.FontFeature.tabularFigures()],
+                      ),
+                      textAlign: TextAlign.center,
                     ),
-                    textAlign: TextAlign.center,
                   ),
                 ),
               ),
@@ -969,14 +1272,18 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
           final streak = h.calculateStreak;
           return GestureDetector(
             key: ValueKey(h.id),
-            onLongPress: () => _editHabit(context, h: h),
+            onLongPress: () {
+              HapticFeedback.mediumImpact();
+              _editHabit(context, h: h);
+            },
             child: Container(
               height: 70,
               padding: const EdgeInsets.symmetric(horizontal: 16),
               alignment: Alignment.centerLeft,
-              decoration: BoxDecoration(
+              decoration: const BoxDecoration(
+                color: _kGroupedBackground,
                 border: Border(
-                  bottom: BorderSide(color: Colors.grey.withOpacity(0.1)),
+                  bottom: BorderSide(color: _kHairline, width: 0.5),
                 ),
               ),
               child: Column(
@@ -989,9 +1296,9 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
                         child: Text(
                           h.name,
                           style: const TextStyle(
-                            fontSize: 11,
+                            fontSize: 12,
                             fontWeight: FontWeight.w600,
-                            height: 1.1,
+                            height: 1.15,
                           ),
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
@@ -1001,7 +1308,16 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
                         const SizedBox(width: 4),
                         _favoriteHeart(),
                       ],
-                      if (h.showStreak && streak >= 2)
+                      if (h.showStreak &&
+                          h.habitType == 'check' &&
+                          ![
+                            'Mood',
+                            'Sleep',
+                            'Sleep score',
+                            'Diary',
+                            'Dreams',
+                          ].contains(h.name) &&
+                          streak >= 2)
                         const Padding(
                           padding: EdgeInsets.only(left: 4),
                           child: Text("🔥", style: TextStyle(fontSize: 12)),
@@ -1016,13 +1332,14 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
                         vertical: 1,
                       ),
                       decoration: BoxDecoration(
-                        color: cat.color.withOpacity(0.1),
+                        color: cat.color.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(4),
                       ),
                       child: Text(
                         cat.name,
                         style: TextStyle(
-                          fontSize: 7,
+                          fontSize: 8,
+                          letterSpacing: 0.2,
                           color: cat.color,
                           fontWeight: FontWeight.bold,
                         ),
@@ -1114,14 +1431,14 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
       child = Icon(
         h.name == "Diary" ? Icons.book : Icons.cloud,
         size: 18,
-        color: hasText ? Colors.blue : Colors.grey[100],
+        color: hasText ? _kAccent : _kEmptyMark,
       );
     } else if (h.habitType == "note") {
       bool hasText = (h.valueMap[ds]?.toString().isNotEmpty ?? false);
       child = Icon(
         Icons.notes,
         size: 18,
-        color: hasText ? Colors.blue : Colors.grey[100],
+        color: hasText ? _kAccent : _kEmptyMark,
       );
     } else if (h.habitType == "number") {
       child = Text(
@@ -1136,13 +1453,20 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
             orElse: () => HabitCategory(id: '', name: '', color: Colors.blue),
           )
           .color;
-      child = Container(
-        width: 24,
-        height: 24,
+      child = AnimatedContainer(
+        duration: _reduceMotion(context)
+            ? Duration.zero
+            : const Duration(milliseconds: 160),
+        curve: Curves.easeOut,
+        width: 26,
+        height: 26,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          color: isDone ? color : Colors.grey[100],
+          color: isDone ? color : _kEmptyMark,
         ),
+        child: isDone
+            ? const Icon(Icons.check_rounded, size: 16, color: Colors.white)
+            : null,
       );
     }
 
@@ -1166,6 +1490,7 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
         } else if (h.habitType == "number") {
           _showHabitNumberPicker(h, ds);
         } else {
+          HapticFeedback.lightImpact();
           Map<String, bool> next = Map.from(h.completionMap);
           next[ds] = !(h.completionMap[ds] ?? false);
           FirebaseFirestore.instance.collection('habits').doc(h.id).update({
@@ -1173,17 +1498,22 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
           });
         }
       },
-      onLongPress: () => _showHabitDayNote(h, ds),
+      onLongPress: () {
+        HapticFeedback.mediumImpact();
+        _showHabitDayNote(h, ds);
+      },
+      behavior: HitTestBehavior.opaque,
       child: Container(
         width: 55,
         height: 70,
         decoration: BoxDecoration(
-          border: Border(
-            bottom: BorderSide(color: Colors.grey.withOpacity(0.1)),
-            right: BorderSide(color: Colors.grey.withOpacity(0.1)),
+          color: dIdx == 0 ? _kAccent.withValues(alpha: 0.04) : null,
+          border: const Border(
+            bottom: BorderSide(color: _kHairline, width: 0.5),
+            right: BorderSide(color: _kHairline, width: 0.5),
           ),
         ),
-        child: Center(child: child),
+        child: Center(child: _PressScale(child: child)),
       ),
     );
   }
@@ -1423,16 +1753,17 @@ class _HabitCalendarScreenState extends State<HabitCalendarScreen> {
           actions: [
             if (h != null)
               TextButton(
-                onPressed: () {
+                onPressed: () async {
+                  if (!await _confirmDelete(context, '"${h.name}"')) return;
                   FirebaseFirestore.instance
                       .collection('habits')
                       .doc(h.id)
                       .delete();
-                  Navigator.pop(context);
+                  if (context.mounted) Navigator.pop(context);
                 },
                 child: const Text(
                   "Delete",
-                  style: TextStyle(color: Colors.red),
+                  style: TextStyle(color: _kDestructive),
                 ),
               ),
             ElevatedButton(
@@ -1516,6 +1847,17 @@ void _showTextPicker(
 }
 
 // --- NEW JOURNAL SCREEN ---
+// "Sat, Oct 10, 2026" reads faster than "2026-10-10"; falls back to the raw key.
+String _journalDate(String key) {
+  try {
+    return DateFormat(
+      'EEE, MMM d, yyyy',
+    ).format(DateFormat('yyyy-MM-dd').parseStrict(key));
+  } catch (_) {
+    return key;
+  }
+}
+
 class JournalScreen extends StatelessWidget {
   const JournalScreen({super.key});
 
@@ -1543,7 +1885,14 @@ class JournalScreen extends StatelessWidget {
 
               if (entries.isEmpty)
                 return const Center(
-                  child: Text("No diary entries yet. Tap 'Board' to write."),
+                  child: Padding(
+                    padding: EdgeInsets.all(32),
+                    child: Text(
+                      "No diary entries yet. Tap 'Board' to write.",
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: _kSecondaryLabel),
+                    ),
+                  ),
                 );
 
               return ListView.builder(
@@ -1565,12 +1914,8 @@ class JournalScreen extends StatelessWidget {
                   }
 
                   return Card(
-                    margin: const EdgeInsets.only(bottom: 16),
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(20),
-                      side: BorderSide(color: Colors.grey.withOpacity(0.1)),
-                    ),
+                    margin: const EdgeInsets.only(bottom: 12),
+                    clipBehavior: Clip.antiAlias,
                     child: ListTile(
                       contentPadding: const EdgeInsets.all(16),
                       title: Row(
@@ -1578,10 +1923,11 @@ class JournalScreen extends StatelessWidget {
                           Text(emoji, style: const TextStyle(fontSize: 24)),
                           const SizedBox(width: 12),
                           Text(
-                            dateStr,
+                            _journalDate(dateStr),
                             style: const TextStyle(
-                              fontWeight: FontWeight.bold,
+                              fontWeight: FontWeight.w700,
                               fontSize: 16,
+                              letterSpacing: -0.2,
                             ),
                           ),
                         ],
@@ -1592,7 +1938,12 @@ class JournalScreen extends StatelessWidget {
                           diaryText.isEmpty ? "No note recorded." : diaryText,
                           maxLines: 3,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(color: Colors.black87),
+                          style: TextStyle(
+                            color: diaryText.isEmpty
+                                ? _kSecondaryLabel
+                                : Colors.black87,
+                            height: 1.4,
+                          ),
                         ),
                       ),
                       onTap: () =>
@@ -1610,9 +1961,68 @@ class JournalScreen extends StatelessWidget {
 }
 
 // --- INSIGHTS ---
-class InsightsScreen extends StatelessWidget {
+class InsightsScreen extends StatefulWidget {
   final List<Habit> habits;
-  const InsightsScreen({super.key, required this.habits});
+  final List<HabitCategory> categories;
+  const InsightsScreen({
+    super.key,
+    required this.habits,
+    this.categories = const [],
+  });
+
+  @override
+  State<InsightsScreen> createState() => _InsightsScreenState();
+}
+
+class _InsightsScreenState extends State<InsightsScreen> {
+  int _insightsTab = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final navigation = PreferredSize(
+      preferredSize: const Size.fromHeight(56),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+        child: SizedBox(
+          width: double.infinity,
+          child: SegmentedButton<int>(
+            segments: const [
+              ButtonSegment(value: 0, label: Text('Relationships')),
+              ButtonSegment(value: 1, label: Text('Averages')),
+              ButtonSegment(value: 2, label: Text('Year')),
+            ],
+            selected: {_insightsTab},
+            showSelectedIcon: false,
+            onSelectionChanged: (selection) =>
+                setState(() => _insightsTab = selection.single),
+          ),
+        ),
+      ),
+    );
+    // Keep selections and scroll positions when switching between views.
+    return IndexedStack(
+      index: _insightsTab,
+      children: [
+        PebblesExplorer(habits: widget.habits, navigation: navigation),
+        InsightsAveragesScreen(habits: widget.habits, navigation: navigation),
+        PebblesYearScreen(
+          habits: widget.habits,
+          categories: widget.categories,
+          navigation: navigation,
+        ),
+      ],
+    );
+  }
+}
+
+class InsightsAveragesScreen extends StatelessWidget {
+  final List<Habit> habits;
+  final PreferredSizeWidget? navigation;
+  const InsightsAveragesScreen({
+    super.key,
+    required this.habits,
+    this.navigation,
+  });
 
   // Older built-in habits store their daily values in `daily_metrics`,
   // whereas custom habits store them in each habit's `valueMap`.
@@ -1759,18 +2169,10 @@ class InsightsScreen extends StatelessWidget {
         return Scaffold(
           appBar: AppBar(
             title: const Text("Insights"),
+            bottom: navigation,
             actions: [
               IconButton(
-                tooltip: 'Explore relationships',
-                icon: const Icon(Icons.insights_rounded),
-                onPressed: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => PebblesExplorer(habits: habits),
-                  ),
-                ),
-              ),
-              IconButton(
+                tooltip: 'Order & colors',
                 icon: const Icon(Icons.auto_fix_high_rounded),
                 onPressed: () => _manageInsights(context, list),
               ),
@@ -1797,7 +2199,14 @@ class InsightsScreen extends StatelessWidget {
                       padding: const EdgeInsets.all(24),
                       decoration: BoxDecoration(
                         color: Color(habit.backgroundColorValue),
-                        borderRadius: BorderRadius.circular(28),
+                        borderRadius: BorderRadius.circular(24),
+                        boxShadow: const [
+                          BoxShadow(
+                            color: Color(0x0F000000),
+                            blurRadius: 16,
+                            offset: Offset(0, 4),
+                          ),
+                        ],
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1805,8 +2214,9 @@ class InsightsScreen extends StatelessWidget {
                           Text(
                             habit.name,
                             style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 18,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 19,
+                              letterSpacing: -0.3,
                             ),
                           ),
                           const SizedBox(height: 15),
@@ -1836,11 +2246,10 @@ class InsightsScreen extends StatelessWidget {
                                 _stat("7 Days", _checkCount(habit, 7)),
                                 _stat("30 Days", _checkCount(habit, 30)),
                               ],
-                              _stat(
-                                "Streak",
-                                _streak(habit, dailyMetrics),
-                                active: habit.showStreak,
-                              ),
+                              if (habit.showStreak &&
+                                  _insightHabitType(habit) == 'check' &&
+                                  habit.name != 'Mood')
+                                _stat("Streak", _streak(habit, dailyMetrics)),
                             ],
                           ),
                         ],
@@ -1863,7 +2272,7 @@ class InsightsScreen extends StatelessWidget {
         builder: (context, scroll) => Column(
           children: [
             const Padding(
-              padding: EdgeInsets.all(16),
+              padding: EdgeInsets.fromLTRB(16, 0, 16, 12),
               child: Text(
                 "Manage Insights Order & Color",
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
@@ -1941,10 +2350,24 @@ class InsightsScreen extends StatelessWidget {
 
   Widget _stat(String l, Object? v, {bool active = true}) => Column(
     children: [
-      Text(l, style: const TextStyle(fontSize: 10, color: Colors.black54)),
+      Text(
+        l.toUpperCase(),
+        style: const TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0.4, // small caps want positive tracking
+          color: Colors.black54,
+        ),
+      ),
+      const SizedBox(height: 2),
       Text(
         active ? _formatStatValue(v) : "-",
-        style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+        style: const TextStyle(
+          fontSize: 26,
+          fontWeight: FontWeight.w700,
+          letterSpacing: -0.5,
+          fontFeatures: [ui.FontFeature.tabularFigures()],
+        ),
       ),
     ],
   );
@@ -1989,7 +2412,8 @@ class _ExplorerPoint {
 
 class PebblesExplorer extends StatefulWidget {
   final List<Habit> habits;
-  const PebblesExplorer({super.key, required this.habits});
+  final PreferredSizeWidget? navigation;
+  const PebblesExplorer({super.key, required this.habits, this.navigation});
   @override
   State<PebblesExplorer> createState() => _PebblesExplorerState();
 }
@@ -2036,44 +2460,6 @@ class _PebblesExplorerState extends State<PebblesExplorer> {
   Future<void> _saveSelectedRows() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setStringList(_rowsKey, selectedEventIds.toList());
-  }
-
-  Color _moodColor(int score) {
-    switch (score) {
-      case 1:
-        return const Color(0xFFC94C54);
-      case 2:
-        return const Color(0xFFD86A55);
-      case 3:
-        return const Color(0xFFE39B59);
-      case 4:
-        return const Color(0xFFEBCA6B);
-      case 5:
-        return const Color(0xFFE9DF9A);
-      case 6:
-        return const Color(0xFFA6CD83);
-      case 7:
-        return const Color(0xFF62B784);
-      case 8:
-        return const Color(0xFF2A9D72);
-      case 9:
-        return const Color(0xFF9870CB);
-      default:
-        return Colors.grey.shade200;
-    }
-  }
-
-  Color _gradientColor(double ratio) {
-    final t = ratio.clamp(0.0, 1.0);
-    const stops = [
-      Color(0xFFC94C54),
-      Color(0xFFE39B59),
-      Color(0xFFEBCA6B),
-      Color(0xFFA6CD83),
-      Color(0xFF2A9D72),
-    ];
-    final index = math.min(3, (t * 4).floor());
-    return Color.lerp(stops[index], stops[index + 1], t * 4 - index)!;
   }
 
   List<_ExplorerMetric> get metrics {
@@ -2176,12 +2562,26 @@ class _PebblesExplorerState extends State<PebblesExplorer> {
       builder: (context, snapshot) {
         if (snapshot.hasError)
           return Scaffold(
-            appBar: AppBar(title: const Text('Explore relationships')),
+            appBar: AppBar(
+              title: Text(
+                widget.navigation == null
+                    ? 'Explore relationships'
+                    : 'Insights',
+              ),
+              bottom: widget.navigation,
+            ),
             body: const Center(child: Text('Could not load data.')),
           );
         if (!snapshot.hasData)
           return Scaffold(
-            appBar: AppBar(title: const Text('Explore relationships')),
+            appBar: AppBar(
+              title: Text(
+                widget.navigation == null
+                    ? 'Explore relationships'
+                    : 'Insights',
+              ),
+              bottom: widget.navigation,
+            ),
             body: const Center(child: CircularProgressIndicator()),
           );
         final daily = <String, Map<String, dynamic>>{};
@@ -2269,6 +2669,10 @@ class _PebblesExplorerState extends State<PebblesExplorer> {
         const cellWidth = 24.0;
         const cellGap = 3.0;
         final timelineWidth = totalDays * (cellWidth + cellGap);
+        const timelineRowHeight = 36.0;
+        // Use the same newest-first date for both headers and metric cells.
+        DateTime timelineDate(int index) =>
+            DateTime(endDay.year, endDay.month, endDay.day - index);
         final eventPalette = <Color>[
           Colors.deepOrange,
           Colors.teal,
@@ -2286,107 +2690,98 @@ class _PebblesExplorerState extends State<PebblesExplorer> {
         }
 
         Widget timelineRow(_ExplorerMetric metric) {
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 5),
-                  child: Text(
-                    metric.label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-                Row(
-                  children: List.generate(totalDays, (index) {
-                    final date = firstDay.add(Duration(days: index));
-                    final key = DateFormat('yyyy-MM-dd').format(date);
-                    final record = daily[key] ?? <String, dynamic>{};
-                    final number = value(metric, key, record);
-                    final recorded = number != null;
-                    Color color = const Color(0xFFE6E8EC);
-                    if (recorded) {
-                      if (metric.type == 'mood') {
-                        color = _moodColor(number.toInt());
-                      } else if (metric.type == 'event') {
-                        color = eventColor[metric.id] ?? Colors.blueGrey;
-                      } else if (metric.id == 'sleep_score') {
-                        color = _gradientColor(number / 100);
-                      } else if (metric.id == 'sleep') {
-                        // Duration is a quantity, not an automatic wellbeing rating.
-                        // 0–12 hours is a display range only; longer durations cap at full saturation.
-                        color = _gradientColor(number / 12);
-                      } else {
-                        // Numeric custom habits use a neutral tint, not an assumed good/bad scale.
-                        color = const Color(0xFF648BB4);
-                      }
+          return SizedBox(
+            height: timelineRowHeight,
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Row(
+                children: List.generate(totalDays, (index) {
+                  final date = timelineDate(index);
+                  final key = DateFormat('yyyy-MM-dd').format(date);
+                  final record = daily[key] ?? <String, dynamic>{};
+                  final number = value(metric, key, record);
+                  final recorded = number != null;
+                  Color color = const Color(0xFFE6E8EC);
+                  if (recorded) {
+                    if (metric.type == 'mood') {
+                      color = _moodColor(number.toInt());
+                    } else if (metric.type == 'event') {
+                      color = eventColor[metric.id] ?? Colors.blueGrey;
+                    } else if (metric.id == 'sleep_score') {
+                      color = _gradientColor(number / 100);
+                    } else if (metric.id == 'sleep') {
+                      // Duration is a quantity, not an automatic wellbeing rating.
+                      // 0–12 hours is a display range only; longer durations cap at full saturation.
+                      color = _gradientColor(number / 12);
+                    } else {
+                      // Numeric custom habits use a neutral tint, not an assumed good/bad scale.
+                      color = const Color(0xFF648BB4);
                     }
-                    return Padding(
-                      padding: const EdgeInsets.only(right: cellGap),
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(3),
-                        onTap: () {
-                          final detail = !recorded
-                              ? 'No value recorded'
-                              : metric.type == 'mood'
-                              ? '${record['mood']} · ${number.toInt()}/9${number == 9 ? ' · special state' : ''}'
-                              : metric.type == 'event'
-                              ? 'Occurrence recorded'
-                              : '${number.toStringAsFixed(number == number.roundToDouble() ? 0 : 1)}${metric.id == 'sleep_score'
-                                    ? '/100'
-                                    : metric.id == 'sleep'
-                                    ? ' hours'
-                                    : ''}';
-                          showDialog<void>(
-                            context: context,
-                            builder: (context) => AlertDialog(
-                              title: Text(
-                                '${metric.label} · ${DateFormat('MMM d, yyyy').format(date)}',
-                              ),
-                              content: Text(detail),
-                              actions: [
-                                TextButton(
-                                  onPressed: () => Navigator.pop(context),
-                                  child: const Text('Close'),
-                                ),
-                              ],
+                  }
+                  return Padding(
+                    padding: const EdgeInsets.only(right: cellGap),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(3),
+                      onTap: () {
+                        final detail = !recorded
+                            ? 'No value recorded'
+                            : metric.type == 'mood'
+                            ? '${record['mood']} · ${number.toInt()}/9${number == 9 ? ' · special state' : ''}'
+                            : metric.type == 'event'
+                            ? 'Occurrence recorded'
+                            : '${number.toStringAsFixed(number == number.roundToDouble() ? 0 : 1)}${metric.id == 'sleep_score'
+                                  ? '/100'
+                                  : metric.id == 'sleep'
+                                  ? ' hours'
+                                  : ''}';
+                        showDialog<void>(
+                          context: context,
+                          builder: (context) => AlertDialog(
+                            title: Text(
+                              '${metric.label} · ${DateFormat('MMM d, yyyy').format(date)}',
                             ),
-                          );
-                        },
-                        child: Container(
-                          width: cellWidth,
-                          height: 22,
-                          decoration: BoxDecoration(
-                            color: color,
-                            borderRadius: BorderRadius.circular(3),
+                            content: Text(detail),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.pop(context),
+                                child: const Text('Close'),
+                              ),
+                            ],
                           ),
-                          child: metric.type == 'event' && recorded
-                              ? const Center(
-                                  child: Icon(
-                                    Icons.circle,
-                                    color: Colors.white,
-                                    size: 6,
-                                  ),
-                                )
-                              : null,
+                        );
+                      },
+                      child: Container(
+                        width: cellWidth,
+                        height: 22,
+                        decoration: BoxDecoration(
+                          color: color,
+                          borderRadius: BorderRadius.circular(3),
                         ),
+                        child: metric.type == 'event' && recorded
+                            ? const Center(
+                                child: Icon(
+                                  Icons.circle,
+                                  color: Colors.white,
+                                  size: 6,
+                                ),
+                              )
+                            : null,
                       ),
-                    );
-                  }),
-                ),
-              ],
+                    ),
+                  );
+                }),
+              ),
             ),
           );
         }
 
         return Scaffold(
-          appBar: AppBar(title: const Text('Explore relationships')),
+          appBar: AppBar(
+            title: Text(
+              widget.navigation == null ? 'Explore relationships' : 'Insights',
+            ),
+            bottom: widget.navigation,
+          ),
           body: ListView(
             padding: const EdgeInsets.all(16),
             children: [
@@ -2414,309 +2809,376 @@ class _PebblesExplorerState extends State<PebblesExplorer> {
               ),
               const SizedBox(height: 12),
               Card(
-                child: Column(
-                  children: [
-                    ListTile(
-                      title: const Text(
-                        'Daily patterns',
-                        style: TextStyle(fontWeight: FontWeight.bold),
+                clipBehavior: Clip.antiAlias,
+                child: AnimatedSize(
+                  duration: _reduceMotion(context)
+                      ? Duration.zero
+                      : const Duration(milliseconds: 260),
+                  curve: Curves.easeOutCubic,
+                  alignment: Alignment.topCenter,
+                  child: Column(
+                    children: [
+                      ListTile(
+                        title: const Text(
+                          'Daily patterns',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        subtitle: Text(
+                          '${visibleRows.length} rows · color-coded by date',
+                        ),
+                        trailing: Icon(
+                          _patternsExpanded
+                              ? Icons.expand_less
+                              : Icons.expand_more,
+                        ),
+                        onTap: () => setState(
+                          () => _patternsExpanded = !_patternsExpanded,
+                        ),
                       ),
-                      subtitle: Text(
-                        '${visibleRows.length} rows · color-coded by date',
-                      ),
-                      trailing: Icon(
-                        _patternsExpanded
-                            ? Icons.expand_less
-                            : Icons.expand_more,
-                      ),
-                      onTap: () => setState(
-                        () => _patternsExpanded = !_patternsExpanded,
-                      ),
-                    ),
-                    if (_patternsExpanded)
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            ListTile(
-                              contentPadding: EdgeInsets.zero,
-                              title: const Text(
-                                'Choose rows',
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              subtitle: Text('${visibleRows.length} selected'),
-                              trailing: Icon(
-                                _chooseRowsExpanded
-                                    ? Icons.expand_less
-                                    : Icons.expand_more,
-                              ),
-                              onTap: () => setState(
-                                () =>
-                                    _chooseRowsExpanded = !_chooseRowsExpanded,
-                              ),
-                            ),
-                            if (_chooseRowsExpanded) ...[
-                              Row(
-                                children: [
-                                  TextButton(
-                                    onPressed: () {
-                                      setState(
-                                        () => selectedEventIds.addAll(
-                                          rowChoices.map((m) => m.id),
-                                        ),
-                                      );
-                                      _saveSelectedRows();
-                                    },
-                                    child: const Text('Select all'),
-                                  ),
-                                  TextButton(
-                                    onPressed: () {
-                                      setState(() => selectedEventIds.clear());
-                                      _saveSelectedRows();
-                                    },
-                                    child: const Text('Clear'),
-                                  ),
-                                ],
-                              ),
-                              ...rowChoices.map(
-                                (metric) => CheckboxListTile(
-                                  dense: true,
-                                  contentPadding: EdgeInsets.zero,
-                                  title: Text(metric.label),
-                                  value: selectedEventIds.contains(metric.id),
-                                  onChanged: (enabled) => _setRowSelected(
-                                    metric.id,
-                                    enabled ?? false,
+                      if (_patternsExpanded)
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              ListTile(
+                                contentPadding: EdgeInsets.zero,
+                                title: const Text(
+                                  'Choose rows',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
                                   ),
                                 ),
-                              ),
-                            ],
-                            if (visibleRows.isEmpty)
-                              const Padding(
-                                padding: EdgeInsets.all(16),
-                                child: Text(
-                                  'Choose rows to display a daily timeline.',
+                                subtitle: Text(
+                                  '${visibleRows.length} selected',
                                 ),
-                              )
-                            else ...[
-                              const Text(
-                                'Swipe sideways to explore dates. Tap any square to see its value.',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.black54,
+                                trailing: Icon(
+                                  _chooseRowsExpanded
+                                      ? Icons.expand_less
+                                      : Icons.expand_more,
+                                ),
+                                onTap: () => setState(
+                                  () => _chooseRowsExpanded =
+                                      !_chooseRowsExpanded,
                                 ),
                               ),
-                              const SizedBox(height: 10),
-                              SizedBox(
-                                height: visibleRows.length * 61.0 + 38,
-                                child: SingleChildScrollView(
-                                  scrollDirection: Axis.horizontal,
-                                  reverse: true,
-                                  child: SizedBox(
-                                    width: timelineWidth,
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        SizedBox(
-                                          height: 28,
-                                          child: Row(
-                                            children: List.generate(totalDays, (
-                                              index,
-                                            ) {
-                                              final date = firstDay.add(
-                                                Duration(days: index),
-                                              );
-                                              return SizedBox(
-                                                width: cellWidth + cellGap,
-                                                child: Text(
-                                                  date.day == 1 ||
-                                                          index == 0 ||
-                                                          date.day % 5 == 0
-                                                      ? '${date.day}'
-                                                      : '',
-                                                  style: const TextStyle(
-                                                    fontSize: 10,
-                                                    color: Colors.black54,
-                                                  ),
-                                                ),
-                                              );
-                                            }),
+                              if (_chooseRowsExpanded) ...[
+                                Row(
+                                  children: [
+                                    TextButton(
+                                      onPressed: () {
+                                        setState(
+                                          () => selectedEventIds.addAll(
+                                            rowChoices.map((m) => m.id),
                                           ),
-                                        ),
-                                        ...visibleRows.map(timelineRow),
-                                      ],
+                                        );
+                                        _saveSelectedRows();
+                                      },
+                                      child: const Text('Select all'),
+                                    ),
+                                    TextButton(
+                                      onPressed: () {
+                                        setState(
+                                          () => selectedEventIds.clear(),
+                                        );
+                                        _saveSelectedRows();
+                                      },
+                                      child: const Text('Clear'),
+                                    ),
+                                  ],
+                                ),
+                                ...rowChoices.map(
+                                  (metric) => CheckboxListTile(
+                                    dense: true,
+                                    contentPadding: EdgeInsets.zero,
+                                    title: Text(metric.label),
+                                    value: selectedEventIds.contains(metric.id),
+                                    onChanged: (enabled) => _setRowSelected(
+                                      metric.id,
+                                      enabled ?? false,
                                     ),
                                   ),
                                 ),
-                              ),
-                              const Wrap(
-                                spacing: 12,
-                                runSpacing: 4,
-                                children: [
-                                  Text(
-                                    'Red → yellow → green: mood / sleep score',
-                                    style: TextStyle(fontSize: 11),
+                              ],
+                              if (visibleRows.isEmpty)
+                                const Padding(
+                                  padding: EdgeInsets.all(16),
+                                  child: Text(
+                                    'Choose rows to display a daily timeline.',
                                   ),
-                                  Text(
-                                    'Purple: Too happy',
-                                    style: TextStyle(fontSize: 11),
+                                )
+                              else ...[
+                                const Text(
+                                  'Swipe sideways to explore dates. Tap any square to see its value.',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.black54,
                                   ),
-                                  Text(
-                                    'Grey: no entry',
-                                    style: TextStyle(fontSize: 11),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 6),
-                              const Text(
-                                'Checkbox marks mean recorded occurrences only; grey does not mean the event did not happen. Sleep duration color shows amount, not quality.',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: Colors.black54,
                                 ),
-                              ),
+                                const SizedBox(height: 10),
+                                // Labels stay outside the shared horizontal viewport.
+                                Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    SizedBox(
+                                      width: 110,
+                                      child: Column(
+                                        children: [
+                                          const SizedBox(height: 28),
+                                          ...visibleRows.map(
+                                            (metric) => SizedBox(
+                                              height: timelineRowHeight,
+                                              child: Align(
+                                                alignment: Alignment.centerLeft,
+                                                child: Padding(
+                                                  padding:
+                                                      const EdgeInsets.only(
+                                                        right: 8,
+                                                      ),
+                                                  child: Tooltip(
+                                                    message: metric.label,
+                                                    child: Text(
+                                                      metric.label,
+                                                      maxLines: 2,
+                                                      overflow:
+                                                          TextOverflow.ellipsis,
+                                                      style: const TextStyle(
+                                                        fontSize: 12,
+                                                        fontWeight:
+                                                            FontWeight.w600,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    Expanded(
+                                      child: SingleChildScrollView(
+                                        scrollDirection: Axis.horizontal,
+                                        child: SizedBox(
+                                          width: timelineWidth,
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              SizedBox(
+                                                height: 28,
+                                                child: Row(
+                                                  children: List.generate(
+                                                    totalDays,
+                                                    (index) {
+                                                      final date = timelineDate(
+                                                        index,
+                                                      );
+                                                      return SizedBox(
+                                                        width:
+                                                            cellWidth + cellGap,
+                                                        child: Text(
+                                                          date.day == 1 ||
+                                                                  index == 0 ||
+                                                                  date.day %
+                                                                          5 ==
+                                                                      0
+                                                              ? '${date.day}'
+                                                              : '',
+                                                          style:
+                                                              const TextStyle(
+                                                                fontSize: 10,
+                                                                color: Colors
+                                                                    .black54,
+                                                              ),
+                                                        ),
+                                                      );
+                                                    },
+                                                  ),
+                                                ),
+                                              ),
+                                              ...visibleRows.map(timelineRow),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const Wrap(
+                                  spacing: 12,
+                                  runSpacing: 4,
+                                  children: [
+                                    Text(
+                                      'Red → yellow → green: mood / sleep score',
+                                      style: TextStyle(fontSize: 11),
+                                    ),
+                                    Text(
+                                      'Purple: Too happy',
+                                      style: TextStyle(fontSize: 11),
+                                    ),
+                                    Text(
+                                      'Grey: no entry',
+                                      style: TextStyle(fontSize: 11),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 6),
+                                const Text(
+                                  'Checkbox marks mean recorded occurrences only; grey does not mean the event did not happen. Sleep duration color shows amount, not quality.',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: Colors.black54,
+                                  ),
+                                ),
+                              ],
                             ],
-                          ],
+                          ),
                         ),
-                      ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
               const SizedBox(height: 10),
               Card(
-                child: Column(
-                  children: [
-                    ListTile(
-                      title: const Text(
-                        'Compare two metrics',
-                        style: TextStyle(fontWeight: FontWeight.bold),
+                clipBehavior: Clip.antiAlias,
+                child: AnimatedSize(
+                  duration: _reduceMotion(context)
+                      ? Duration.zero
+                      : const Duration(milliseconds: 260),
+                  curve: Curves.easeOutCubic,
+                  alignment: Alignment.topCenter,
+                  child: Column(
+                    children: [
+                      ListTile(
+                        title: const Text(
+                          'Compare two metrics',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        subtitle: const Text(
+                          'Explore relationships with a scatter plot',
+                        ),
+                        trailing: Icon(
+                          _compareExpanded
+                              ? Icons.expand_less
+                              : Icons.expand_more,
+                        ),
+                        onTap: () => setState(
+                          () => _compareExpanded = !_compareExpanded,
+                        ),
                       ),
-                      subtitle: const Text(
-                        'Explore relationships with a scatter plot',
-                      ),
-                      trailing: Icon(
-                        _compareExpanded
-                            ? Icons.expand_less
-                            : Icons.expand_more,
-                      ),
-                      onTap: () =>
-                          setState(() => _compareExpanded = !_compareExpanded),
-                    ),
-                    if (_compareExpanded)
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            DropdownButtonFormField<String>(
-                              value: x.id,
-                              isExpanded: true,
-                              decoration: const InputDecoration(
-                                labelText: 'X axis / first metric',
-                                border: OutlineInputBorder(),
-                              ),
-                              items: choices
-                                  .map(
-                                    (m) => DropdownMenuItem(
-                                      value: m.id,
-                                      child: Text(m.label),
-                                    ),
-                                  )
-                                  .toList(),
-                              onChanged: (v) => setState(() => xId = v ?? xId),
-                            ),
-                            const SizedBox(height: 12),
-                            DropdownButtonFormField<String>(
-                              value: y.id,
-                              isExpanded: true,
-                              decoration: const InputDecoration(
-                                labelText: 'Y axis / second metric',
-                                border: OutlineInputBorder(),
-                              ),
-                              items: choices
-                                  .map(
-                                    (m) => DropdownMenuItem(
-                                      value: m.id,
-                                      child: Text(m.label),
-                                    ),
-                                  )
-                                  .toList(),
-                              onChanged: (v) => setState(() => yId = v ?? yId),
-                            ),
-                            const SizedBox(height: 12),
-                            Text(
-                              'Matched recorded days: ${points.length}',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            if (excludedSpecial > 0)
-                              Text(
-                                'Too happy: $excludedSpecial special-state days excluded from correlation.',
-                              ),
-                            const SizedBox(height: 8),
-                            if (x.id == y.id)
-                              const Text(
-                                'Choose two different metrics to compare.',
-                              )
-                            else if (points.isEmpty)
-                              const Padding(
-                                padding: EdgeInsets.all(32),
-                                child: Center(
-                                  child: Text(
-                                    'No days have both metrics recorded in this period.',
-                                  ),
+                      if (_compareExpanded)
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              DropdownButtonFormField<String>(
+                                value: x.id,
+                                isExpanded: true,
+                                decoration: const InputDecoration(
+                                  labelText: 'X axis / first metric',
                                 ),
-                              )
-                            else
-                              SizedBox(
-                                height: 310,
-                                child: CustomPaint(
-                                  painter: _PebblesScatterPainter(
-                                    points: points,
-                                    xLabel: x.label,
-                                    yLabel: y.label,
-                                    eventMode: eventMode,
-                                  ),
-                                ),
+                                items: choices
+                                    .map(
+                                      (m) => DropdownMenuItem(
+                                        value: m.id,
+                                        child: Text(m.label),
+                                      ),
+                                    )
+                                    .toList(),
+                                onChanged: (v) =>
+                                    setState(() => xId = v ?? xId),
                               ),
-                            const SizedBox(height: 8),
-                            if (r != null)
+                              const SizedBox(height: 12),
+                              DropdownButtonFormField<String>(
+                                value: y.id,
+                                isExpanded: true,
+                                decoration: const InputDecoration(
+                                  labelText: 'Y axis / second metric',
+                                ),
+                                items: choices
+                                    .map(
+                                      (m) => DropdownMenuItem(
+                                        value: m.id,
+                                        child: Text(m.label),
+                                      ),
+                                    )
+                                    .toList(),
+                                onChanged: (v) =>
+                                    setState(() => yId = v ?? yId),
+                              ),
+                              const SizedBox(height: 12),
                               Text(
-                                'Pearson correlation (ordinary mood days): ${r.toStringAsFixed(2)} · n=${ordinary.length}',
+                                'Matched recorded days: ${points.length}',
                                 style: const TextStyle(
                                   fontWeight: FontWeight.w600,
                                 ),
                               ),
-                            if (numericPair && r == null && points.isNotEmpty)
+                              if (excludedSpecial > 0)
+                                Text(
+                                  'Too happy: $excludedSpecial special-state days excluded from correlation.',
+                                ),
+                              const SizedBox(height: 8),
+                              if (x.id == y.id)
+                                const Text(
+                                  'Choose two different metrics to compare.',
+                                )
+                              else if (points.isEmpty)
+                                const Padding(
+                                  padding: EdgeInsets.all(32),
+                                  child: Center(
+                                    child: Text(
+                                      'No days have both metrics recorded in this period.',
+                                    ),
+                                  ),
+                                )
+                              else
+                                SizedBox(
+                                  height: 310,
+                                  child: CustomPaint(
+                                    painter: _PebblesScatterPainter(
+                                      points: points,
+                                      xLabel: x.label,
+                                      yLabel: y.label,
+                                      eventMode: eventMode,
+                                    ),
+                                  ),
+                                ),
+                              const SizedBox(height: 8),
+                              if (r != null)
+                                Text(
+                                  'Pearson correlation (ordinary mood days): ${r.toStringAsFixed(2)} · n=${ordinary.length}',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              if (numericPair && r == null && points.isNotEmpty)
+                                const Text(
+                                  'Correlation unavailable: at least 3 matched, varying ordinary observations are needed.',
+                                ),
+                              if (eventMode)
+                                const Text(
+                                  'Checkbox habits show recorded occurrences only; unchecked days are unknown.',
+                                ),
+                              if (x.type == 'mood' || y.type == 'mood')
+                                const Text(
+                                  'Mood scores: Sad 1 · Rough 2 · Run down 3 · Fine but a bit low 4 · Fine / Tired but ok 5 · Good 6 · Great 7 · Happy 8. Too happy 9 is a special state.',
+                                ),
+                              const SizedBox(height: 8),
                               const Text(
-                                'Correlation unavailable: at least 3 matched, varying ordinary observations are needed.',
+                                'Exploratory associations do not establish cause and effect. Missing entries are not treated as zero.',
+                                style: TextStyle(
+                                  color: Colors.black54,
+                                  fontSize: 12,
+                                ),
                               ),
-                            if (eventMode)
-                              const Text(
-                                'Checkbox habits show recorded occurrences only; unchecked days are unknown.',
-                              ),
-                            if (x.type == 'mood' || y.type == 'mood')
-                              const Text(
-                                'Mood scores: Sad 1 · Rough 2 · Run down 3 · Fine but a bit low 4 · Fine / Tired but ok 5 · Good 6 · Great 7 · Happy 8. Too happy 9 is a special state.',
-                              ),
-                            const SizedBox(height: 8),
-                            const Text(
-                              'Exploratory associations do not establish cause and effect. Missing entries are not treated as zero.',
-                              style: TextStyle(
-                                color: Colors.black54,
-                                fontSize: 12,
-                              ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
-                      ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ],
@@ -3103,16 +3565,17 @@ class _ManageScreenState extends State<ManageScreen>
           actions: [
             if (h != null)
               TextButton(
-                onPressed: () {
+                onPressed: () async {
+                  if (!await _confirmDelete(context, '"${h.name}"')) return;
                   FirebaseFirestore.instance
                       .collection('habits')
                       .doc(h.id)
                       .delete();
-                  Navigator.pop(context);
+                  if (context.mounted) Navigator.pop(context);
                 },
                 child: const Text(
                   "Delete",
-                  style: TextStyle(color: Colors.red),
+                  style: TextStyle(color: _kDestructive),
                 ),
               ),
             ElevatedButton(
@@ -3212,14 +3675,18 @@ class _ManageScreenState extends State<ManageScreen>
         actions: [
           if (doc != null)
             TextButton(
-              onPressed: () {
+              onPressed: () async {
+                if (!await _confirmDelete(context, 'this mood')) return;
                 FirebaseFirestore.instance
                     .collection('moods')
                     .doc(doc.id)
                     .delete();
-                Navigator.pop(context);
+                if (context.mounted) Navigator.pop(context);
               },
-              child: const Text("Delete", style: TextStyle(color: Colors.red)),
+              child: const Text(
+                "Delete",
+                style: TextStyle(color: _kDestructive),
+              ),
             ),
           ElevatedButton(
             onPressed: () {
@@ -3305,16 +3772,19 @@ class _MoodList extends StatelessWidget {
                         ),
                         actions: [
                           TextButton(
-                            onPressed: () {
+                            onPressed: () async {
+                              if (!await _confirmDelete(context, 'this mood')) {
+                                return;
+                              }
                               FirebaseFirestore.instance
                                   .collection('moods')
                                   .doc(m.id)
                                   .delete();
-                              Navigator.pop(context);
+                              if (context.mounted) Navigator.pop(context);
                             },
                             child: const Text(
                               "Delete",
-                              style: TextStyle(color: Colors.red),
+                              style: TextStyle(color: _kDestructive),
                             ),
                           ),
                           ElevatedButton(
@@ -3339,6 +3809,338 @@ class _MoodList extends StatelessWidget {
               .toList(),
         );
       },
+    );
+  }
+}
+
+Color _moodColor(int score) {
+  switch (score) {
+    case 1:
+      return const Color(0xFFC94C54);
+    case 2:
+      return const Color(0xFFD86A55);
+    case 3:
+      return const Color(0xFFE39B59);
+    case 4:
+      return const Color(0xFFEBCA6B);
+    case 5:
+      return const Color(0xFFE9DF9A);
+    case 6:
+      return const Color(0xFFA6CD83);
+    case 7:
+      return const Color(0xFF62B784);
+    case 8:
+      return const Color(0xFF2A9D72);
+    case 9:
+      return const Color(0xFF9870CB);
+    default:
+      return Colors.grey.shade200;
+  }
+}
+
+Color _gradientColor(double ratio) {
+  final t = ratio.clamp(0.0, 1.0);
+  const stops = [
+    Color(0xFFC94C54),
+    Color(0xFFE39B59),
+    Color(0xFFEBCA6B),
+    Color(0xFFA6CD83),
+    Color(0xFF2A9D72),
+  ];
+  final index = math.min(3, (t * 4).floor());
+  return Color.lerp(stops[index], stops[index + 1], t * 4 - index)!;
+}
+
+// A compact calendar: each metric has twelve month rows and 31 day columns.
+class PebblesYearScreen extends StatefulWidget {
+  final List<Habit> habits;
+  final List<HabitCategory> categories;
+  final PreferredSizeWidget navigation;
+  const PebblesYearScreen({
+    super.key,
+    required this.habits,
+    required this.categories,
+    required this.navigation,
+  });
+  @override
+  State<PebblesYearScreen> createState() => _PebblesYearScreenState();
+}
+
+class _PebblesYearScreenState extends State<PebblesYearScreen> {
+  int _year = DateTime.now().year;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Insights'), bottom: widget.navigation),
+      body: StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance
+            .collection('daily_metrics')
+            .snapshots(),
+        builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return const Center(child: Text("Couldn't load year data."));
+          }
+          if (!snapshot.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          final daily = <String, Map<String, dynamic>>{
+            for (final doc in snapshot.data!.docs)
+              doc.id: Map<String, dynamic>.from(doc.data() as Map),
+          };
+          Habit? builtIn(String name) {
+            for (final habit in widget.habits) {
+              if (habit.name == name) return habit;
+            }
+            return null;
+          }
+
+          final metrics = <_ExplorerMetric>[
+            _ExplorerMetric('mood', 'Mood', 'mood', builtIn('Mood')),
+            _ExplorerMetric('sleep', 'Sleep', 'numeric', builtIn('Sleep')),
+            _ExplorerMetric(
+              'sleep_score',
+              'Sleep score',
+              'numeric',
+              builtIn('Sleep score'),
+            ),
+            for (final habit in widget.habits)
+              if (!['Mood', 'Sleep', 'Sleep score'].contains(habit.name))
+                _ExplorerMetric(
+                  'habit:${habit.id}',
+                  habit.name,
+                  ['Diary', 'Dreams'].contains(habit.name) ||
+                          habit.habitType == 'note'
+                      ? 'note'
+                      : habit.habitType == 'number'
+                      ? 'numeric'
+                      : 'event',
+                  habit,
+                ),
+          ];
+          final groups = <String, List<_ExplorerMetric>>{};
+          for (final metric in metrics) {
+            final tag = metric.habit?.categoryId ?? '';
+            groups.putIfAbsent(tag, () => []).add(metric);
+          }
+          final tagIds = [
+            ...widget.categories
+                .where((c) => groups.containsKey(c.id))
+                .map((c) => c.id),
+            ...groups.keys.where(
+              (id) => !widget.categories.any((c) => c.id == id),
+            ),
+          ];
+          return ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  IconButton(
+                    tooltip: 'Previous year',
+                    icon: const Icon(Icons.chevron_left),
+                    onPressed: () => setState(() => _year--),
+                  ),
+                  Text(
+                    '$_year',
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Next year',
+                    icon: const Icon(Icons.chevron_right),
+                    onPressed: _year < DateTime.now().year
+                        ? () => setState(() => _year++)
+                        : null,
+                  ),
+                ],
+              ),
+              const Text(
+                'Each square is one day. Months run from January to December; days run left to right. Tap a square for details.',
+                style: TextStyle(fontSize: 12, color: _kSecondaryLabel),
+              ),
+              const SizedBox(height: 12),
+              for (final tagId in tagIds) ...[
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Text(
+                    widget.categories.where((c) => c.id == tagId).isEmpty
+                        ? (tagId.isEmpty ? 'No Tag' : 'Other metrics')
+                        : widget.categories
+                              .firstWhere((c) => c.id == tagId)
+                              .name,
+                    style: const TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                for (final metric in groups[tagId]!)
+                  _calendar(context, metric, daily),
+              ],
+              const Text(
+                'Mood and sleep score: red → yellow → green. Purple mood: Too happy. Sleep colours show duration, not quality. Other recorded values use the tag colour; grey means no entry. Unchecked habits are unknown.',
+                style: TextStyle(fontSize: 11, color: _kSecondaryLabel),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _calendar(
+    BuildContext context,
+    _ExplorerMetric metric,
+    Map<String, Map<String, dynamic>> daily,
+  ) {
+    Color tagColor = const Color(0xFF648BB4);
+    for (final tag in widget.categories) {
+      if (tag.id == metric.habit?.categoryId) tagColor = tag.color;
+    }
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              metric.label,
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 8),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final pitch = (constraints.maxWidth - 30) / 31;
+                return Column(
+                  children: [
+                    for (int month = 1; month <= 12; month++)
+                      Row(
+                        children: [
+                          SizedBox(
+                            width: 30,
+                            child: Text(
+                              DateFormat('MMM').format(DateTime(_year, month)),
+                              style: const TextStyle(
+                                fontSize: 9,
+                                color: _kSecondaryLabel,
+                              ),
+                            ),
+                          ),
+                          for (int day = 1; day <= 31; day++)
+                            SizedBox(
+                              width: pitch,
+                              height: pitch + 2,
+                              child: day > DateTime(_year, month + 1, 0).day
+                                  ? const SizedBox()
+                                  : _day(
+                                      context,
+                                      metric,
+                                      DateTime(_year, month, day),
+                                      daily,
+                                      tagColor,
+                                    ),
+                            ),
+                        ],
+                      ),
+                  ],
+                );
+              },
+            ),
+            const SizedBox(height: 6),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _day(
+    BuildContext context,
+    _ExplorerMetric metric,
+    DateTime date,
+    Map<String, Map<String, dynamic>> daily,
+    Color tagColor,
+  ) {
+    final now = DateTime.now();
+    if (date.isAfter(DateTime(now.year, now.month, now.day))) {
+      return const SizedBox();
+    }
+    final key = DateFormat('yyyy-MM-dd').format(date);
+    final record = daily[key] ?? <String, dynamic>{};
+    dynamic raw;
+    if (metric.id == 'mood') {
+      raw = record['mood'];
+    } else if (metric.id == 'sleep' || metric.id == 'sleep_score') {
+      raw = record[metric.id];
+    } else if (metric.type == 'event') {
+      raw = metric.habit!.completionMap[key] == true
+          ? 'Occurrence recorded'
+          : null;
+    } else if (metric.habit!.name == 'Diary' ||
+        metric.habit!.name == 'Dreams') {
+      raw = record[metric.habit!.name.toLowerCase()];
+    } else {
+      raw = metric.habit!.valueMap[key];
+    }
+    final number = double.tryParse(raw?.toString().replaceAll(',', '.') ?? '');
+    final score = metric.type == 'mood' ? PebblesMoodScale.score(raw) : null;
+    final recorded = metric.type == 'mood'
+        ? score != null
+        : metric.type == 'numeric'
+        ? number != null && number.isFinite
+        : raw != null && raw.toString().trim().isNotEmpty;
+    Color color = const Color(0xFFE6E8EC);
+    if (recorded) {
+      color = metric.type == 'mood'
+          ? _moodColor(score!)
+          : metric.id == 'sleep_score'
+          ? _gradientColor(number! / 100)
+          : metric.id == 'sleep'
+          ? _gradientColor(number! / 12)
+          : tagColor;
+    }
+    final detail = recorded
+        ? '$raw${metric.id == 'sleep'
+              ? ' hours'
+              : metric.id == 'sleep_score'
+              ? '/100'
+              : ''}'
+        : 'No value recorded';
+    final title = '${metric.label} · ${DateFormat('MMM d, yyyy').format(date)}';
+    return Semantics(
+      label: '$title: $detail',
+      button: true,
+      child: Tooltip(
+        message: '$title: $detail',
+        child: InkWell(
+          onTap: () => showDialog<void>(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: Text(title),
+              content: Text(detail),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Close'),
+                ),
+              ],
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(1),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: color,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
